@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="108" fill="#0f172a"/>
+  <rect x="24" y="24" width="464" height="464" rx="90" fill="none" stroke="#0ea5e9" stroke-width="8" stroke-dasharray="16 8"/>
+  <g fill="#0ea5e9" transform="translate(100, 100) scale(0.61)">
+    <!-- Steel Beam I Shape -->
+    <path d="M 60 40 L 452 40 L 452 110 L 296 110 L 296 402 L 452 402 L 452 472 L 60 472 L 60 402 L 216 402 L 216 110 L 60 110 Z" fill="#0284c7" stroke="#38bdf8" stroke-width="16" stroke-linejoin="round"/>
+    <path d="M 120 75 L 392 75" stroke="#bae6fd" stroke-width="12" stroke-linecap="round"/>
+    <path d="M 120 437 L 392 437" stroke="#bae6fd" stroke-width="12" stroke-linecap="round"/>
+    <circle cx="256" cy="256" r="32" fill="#38bdf8"/>
+  </g>
+  <text x="256" y="445" font-family="system-ui, -apple-system, sans-serif" font-size="34" font-weight="900" fill="#f8fafc" text-anchor="middle" letter-spacing="4">ACEROS CHILE</text>
+</svg>

@@ -1,0 +1,33 @@
+{
+  "name": "Aceros Chile - Manual & Calculadoras de Maestranza",
+  "short_name": "Aceros Chile",
+  "description": "Gestión de materiales, manual técnico interactivo de perfiles de acero chilenos, calculadoras de peso con densidad 8.0, plegado de canales y cubicación de proyectos.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#0f172a",
+  "orientation": "portrait-primary",
+  "lang": "es-CL",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
