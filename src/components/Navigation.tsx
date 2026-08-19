@@ -7,7 +7,8 @@ import {
   BookOpen, 
   ArrowRightLeft, 
   ShoppingBag, 
-  FolderKanban 
+  FolderKanban,
+  FileBox
 } from "lucide-react";
 import { NavigationTab } from "../types";
 
@@ -83,6 +84,13 @@ export const Navigation: React.FC<NavigationProps> = ({
       shortLabel: "Conversor",
       subLabel: "Pulgadas, mm, Pies, Peso",
       icon: ArrowRightLeft
+    },
+    {
+      id: "cnc",
+      label: "Visor CNC",
+      shortLabel: "CNC",
+      subLabel: "DXF & NC1/DSTV, Plano y 3D",
+      icon: FileBox
     },
     {
       id: "catalog",

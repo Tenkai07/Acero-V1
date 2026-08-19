@@ -5,6 +5,7 @@ export type NavigationTab =
   | "folding" 
   | "manual" 
   | "converter" 
+  | "cnc"
   | "catalog" 
   | "projects";
 
