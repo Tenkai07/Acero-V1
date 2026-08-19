@@ -12,11 +12,13 @@ export default defineConfig(() => {
       },
     },
     server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      // Safety net: allow any host (e.g. your Render subdomain) to reach the
+      // Vite dev middleware. Production should serve static files instead
+      // (see server.ts), but this prevents "Blocked request" errors if the
+      // app ever falls back to dev mode.
+      allowedHosts: true as true,
     },
   };
 });

@@ -145,8 +145,18 @@ export function AuthenticatedApp() {
 
   // Add Item to Active Project
   const handleAddItemToProject = (itemData: Omit<SteelProjectItem, "id" | "createdAt">) => {
+    handleAddMultipleItemsToProject([itemData]);
+  };
+
+  // Bulk-add many items at once to the active project (used by Excel cubicación imports)
+  const handleAddMultipleItemsToProject = (
+    itemsData: Omit<SteelProjectItem, "id" | "createdAt">[],
+    targetProjectId?: string
+  ) => {
+    if (itemsData.length === 0) return;
+
     let currentProjects = [...projects];
-    let activeProj = currentProjects.find((p) => p.id === activeProjectId);
+    let activeProj = currentProjects.find((p) => p.id === (targetProjectId || activeProjectId));
 
     if (!activeProj) {
       // Create default project if none exists
@@ -163,20 +173,20 @@ export function AuthenticatedApp() {
       setActiveProjectId(activeProj.id);
     }
 
-    const newItem: SteelProjectItem = {
+    const newItems: SteelProjectItem[] = itemsData.map((itemData, idx) => ({
       ...itemData,
-      id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+      id: `item-${Date.now()}-${idx}-${Math.random().toString(36).substr(2, 5)}`,
       createdAt: new Date().toISOString()
-    };
+    }));
 
-    activeProj.items.push(newItem);
+    activeProj.items.push(...newItems);
     activeProj.totalWeightKg = Number(activeProj.items.reduce((sum, it) => sum + it.totalWeightKg, 0).toFixed(2));
     activeProj.totalPriceCLP = Math.round(activeProj.items.reduce((sum, it) => sum + it.totalPriceCLP, 0));
     activeProj.updatedAt = new Date().toISOString();
 
     saveProject(activeProj);
     setProjects(getProjects());
-    
+
     // Background cloud sync
     triggerCloudSync();
   };
@@ -367,12 +377,14 @@ export function AuthenticatedApp() {
             activeProjectId={activeProjectId}
             history={history}
             syncStatus={syncStatus}
+            basePriceKgCLP={basePriceKgCLP}
             onSelectProject={setActiveProjectId}
             onCreateProject={handleCreateProject}
             onDeleteProject={handleDeleteProject}
             onDeleteItemFromProject={handleDeleteItemFromProject}
             onClearHistory={handleClearHistory}
             onDeleteHistoryItem={handleDeleteHistoryItem}
+            onAddMultipleItemsToProject={handleAddMultipleItemsToProject}
             onTriggerSync={triggerCloudSync}
             onAddHistoryItemToProject={handleAddHistoryItemToProject}
           />

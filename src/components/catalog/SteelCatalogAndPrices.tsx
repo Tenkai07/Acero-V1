@@ -12,15 +12,12 @@ import {
   BookOpen, 
   BadgePercent 
 } from "lucide-react";
-import { CHILEAN_STEEL_GRADES, MARKET_PRICE_REFERENCES } from "../../data/chileanSteelData";
+import { MARKET_PRICE_REFERENCES } from "../../data/chileanSteelData";
 
 export const SteelCatalogAndPrices: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<"grades" | "identification" | "prices">("grades");
-  const [selectedGradeId, setSelectedGradeId] = useState<string>("a270es");
+  const [activeTab, setActiveTab] = useState<"identification" | "prices">("identification");
   const [priceCategory, setPriceCategory] = useState<string>("all");
   const [searchPrice, setSearchPrice] = useState<string>("");
-
-  const selectedGrade = CHILEAN_STEEL_GRADES.find((g) => g.id === selectedGradeId) || CHILEAN_STEEL_GRADES[0];
 
   const filteredPrices = MARKET_PRICE_REFERENCES.filter((p) => {
     const matchesCat = priceCategory === "all" || p.category === priceCategory;
@@ -46,7 +43,7 @@ export const SteelCatalogAndPrices: React.FC = () => {
               </h2>
             </div>
             <p className="text-sm text-slate-300 mt-1">
-              Catálogo de calidades chilenas (<strong>NCh 203, NCh 204, ICHA</strong>), guía de identificación visual por código de colores y marcas, y lista de precios referenciales en CLP.
+              Guía de identificación visual por código de colores y marcas, y lista de precios referenciales en CLP.
             </p>
           </div>
         </div>
@@ -55,7 +52,6 @@ export const SteelCatalogAndPrices: React.FC = () => {
       {/* Main Tab Bar */}
       <div className="flex bg-slate-900 p-1.5 rounded-xl border border-slate-800 gap-1 overflow-x-auto no-scrollbar">
         {[
-          { id: "grades", label: "Calidades & Normas Chilenas", icon: BookOpen },
           { id: "identification", label: "Cómo Identificar en Obra / Taller", icon: HelpCircle },
           { id: "prices", label: "Precios de Mercado (CLP)", icon: DollarSign },
         ].map((tab) => {
@@ -79,138 +75,6 @@ export const SteelCatalogAndPrices: React.FC = () => {
       </div>
 
       {/* Tab 1: Grades & Standards */}
-      {activeTab === "grades" && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          
-          {/* Grade Selector List */}
-          <div className="lg:col-span-4 space-y-2">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider block">
-              Calidades Estructurales Habituales en Chile:
-            </label>
-
-            <div className="space-y-1.5 max-h-[500px] overflow-y-auto pr-1">
-              {CHILEAN_STEEL_GRADES.map((grade) => {
-                const isSelected = selectedGrade?.id === grade.id;
-                return (
-                  <button
-                    key={grade.id}
-                    onClick={() => setSelectedGradeId(grade.id)}
-                    className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer ${
-                      isSelected
-                        ? "bg-sky-500/15 border-sky-500 text-white shadow-md ring-1 ring-sky-500/40"
-                        : "bg-slate-900/80 border-slate-800 text-slate-300 hover:bg-slate-800/80"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-sm text-white">{grade.designation}</span>
-                      <span className="text-[10px] font-mono font-bold bg-slate-950 px-2 py-0.5 rounded text-sky-400 border border-slate-800">
-                        {grade.standard}
-                      </span>
-                    </div>
-                    <div className="text-xs text-slate-400 mt-1 line-clamp-1">
-                      {grade.application}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Grade Full Technical Sheet */}
-          <div className="lg:col-span-8 space-y-4">
-            {selectedGrade && (
-              <div className="bg-slate-800/90 dark:bg-slate-900 border border-slate-700 rounded-2xl p-5 sm:p-6 space-y-5">
-                
-                {/* Header */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-700 pb-4 gap-2">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-2xl font-black text-white">{selectedGrade.designation}</h3>
-                      <span className="bg-sky-500/20 text-sky-300 text-xs px-2.5 py-0.5 rounded-full font-bold border border-sky-500/30">
-                        {selectedGrade.standard}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-300 mt-1">
-                      Equivalencias Internacionales: <strong className="text-sky-400">{selectedGrade.equivalentStandards.join(" | ")}</strong>
-                    </p>
-                  </div>
-
-                  {/* Identification Color Tag */}
-                  <div className="flex items-center gap-2 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800 self-start">
-                    <span className="text-[11px] text-slate-400">Color de Punta:</span>
-                    <span className="text-xs font-bold text-sky-300">{selectedGrade.identificationColor}</span>
-                  </div>
-                </div>
-
-                {/* Mechanical Properties Grid */}
-                <div>
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2.5">
-                    Propiedades Mecánicas Garantizadas:
-                  </h4>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      <span className="text-[10px] text-slate-400 block">Límite de Fluencia (Fy):</span>
-                      <span className="text-base font-black text-sky-400 font-mono">
-                        {selectedGrade.yieldStrengthMinMpa} MPa
-                      </span>
-                      <span className="text-[10px] text-slate-500 block">({(selectedGrade.yieldStrengthMinMpa * 10.197).toFixed(0)} kgf/cm²)</span>
-                    </div>
-
-                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      <span className="text-[10px] text-slate-400 block">Resistencia Tracción (Fu):</span>
-                      <span className="text-sm font-bold text-white font-mono">
-                        {selectedGrade.tensileStrengthMpa} MPa
-                      </span>
-                    </div>
-
-                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      <span className="text-[10px] text-slate-400 block">Alargamiento Mínimo:</span>
-                      <span className="text-base font-black text-emerald-400 font-mono">
-                        {selectedGrade.elongationMinPercent}%
-                      </span>
-                      <span className="text-[10px] text-slate-500 block">en L=200mm</span>
-                    </div>
-
-                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                      <span className="text-[10px] text-slate-400 block">Soldabilidad / CEV:</span>
-                      <span className="text-xs font-bold text-cyan-400">
-                        {selectedGrade.weldability}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Applications & Features */}
-                <div className="space-y-2">
-                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                    Aplicaciones y Usos Típicos en Chile:
-                  </h4>
-                  <p className="text-sm text-slate-200 bg-slate-950/60 p-3 rounded-xl border border-slate-800 leading-relaxed">
-                    {selectedGrade.application}
-                  </p>
-                </div>
-
-                {/* Weldability & Workshop Notes */}
-                <div className="p-3.5 rounded-xl bg-sky-500/10 border border-sky-500/20 text-xs text-slate-300 space-y-1">
-                  <div className="flex items-center gap-1.5 font-bold text-sky-400">
-                    <Info className="w-4 h-4" />
-                    <span>Recomendaciones de Taller y Fabricación:</span>
-                  </div>
-                  <p>
-                    {selectedGrade.id === "a270es" && "Acero estructural soldable estándar para edificación sismorresistente en Chile. No requiere precalentamiento para espesores menores a 25 mm con electrodos E7018 o microalambre ER70S-6."}
-                    {selectedGrade.id === "a630-420h" && "Barras de hormigón armado con resaltes. La letra 'H' indica uso en hormigón. El doblado debe respetar los diámetros de mandril de la norma NCh 204 para evitar fisuración del núcleo."}
-                    {selectedGrade.id === "a36" && "Acero al carbono tradicional para pletinas, perfiles comerciales y pernos de anclaje. Soldabilidad universal."}
-                    {selectedGrade.id === "a572-50" && "Acero de alta resistencia y baja aleación (HSLA). Ideal para vigas de grandes luces y puentes, reduciendo el peso de la estructura hasta un 25%."}
-                  </p>
-                </div>
-
-              </div>
-            )}
-          </div>
-
-        </div>
-      )}
-
       {/* Tab 2: How to Identify Steel */}
       {activeTab === "identification" && (
         <div className="space-y-6">

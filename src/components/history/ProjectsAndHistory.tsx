@@ -14,16 +14,19 @@ import {
   Layers, 
   ArrowRight, 
   DollarSign, 
-  Weight 
+  Weight,
+  Upload
 } from "lucide-react";
 import { CalculationHistoryItem, SteelProject, SteelProjectItem } from "../../types";
 import { exportProjectToPDF, exportProjectToExcel, exportHistoryToExcel } from "../../utils/exportUtils";
+import { ImportCubicacionModal } from "./ImportCubicacionModal";
 
 interface ProjectsAndHistoryProps {
   projects: SteelProject[];
   activeProjectId: string | null;
   history: CalculationHistoryItem[];
   syncStatus: "synced" | "syncing" | "offline" | "error";
+  basePriceKgCLP?: number;
   onSelectProject: (id: string) => void;
   onCreateProject: (name: string, client?: string, notes?: string) => void;
   onDeleteProject: (id: string) => void;
@@ -32,6 +35,7 @@ interface ProjectsAndHistoryProps {
   onDeleteHistoryItem: (id: string) => void;
   onTriggerSync: () => void;
   onAddHistoryItemToProject: (historyItem: CalculationHistoryItem) => void;
+  onAddMultipleItemsToProject?: (items: Omit<SteelProjectItem, "id" | "createdAt">[], targetProjectId?: string) => void;
 }
 
 export const ProjectsAndHistory: React.FC<ProjectsAndHistoryProps> = ({
@@ -39,6 +43,7 @@ export const ProjectsAndHistory: React.FC<ProjectsAndHistoryProps> = ({
   activeProjectId,
   history,
   syncStatus,
+  basePriceKgCLP = 1420,
   onSelectProject,
   onCreateProject,
   onDeleteProject,
@@ -46,10 +51,12 @@ export const ProjectsAndHistory: React.FC<ProjectsAndHistoryProps> = ({
   onClearHistory,
   onDeleteHistoryItem,
   onTriggerSync,
-  onAddHistoryItemToProject
+  onAddHistoryItemToProject,
+  onAddMultipleItemsToProject
 }) => {
   const [subTab, setSubTab] = useState<"projects" | "history">("projects");
   const [showNewProjectModal, setShowNewProjectModal] = useState<boolean>(false);
+  const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [newProjectName, setNewProjectName] = useState<string>("");
   const [newProjectClient, setNewProjectClient] = useState<string>("");
   const [newProjectNotes, setNewProjectNotes] = useState<string>("");
@@ -264,6 +271,17 @@ export const ProjectsAndHistory: React.FC<ProjectsAndHistoryProps> = ({
 
                   {/* Export Buttons */}
                   <div className="flex items-center gap-2 self-start sm:self-auto">
+                    {onAddMultipleItemsToProject && (
+                      <button
+                        type="button"
+                        onClick={() => setShowImportModal(true)}
+                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs shadow transition-all cursor-pointer"
+                      >
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Importar Excel</span>
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       onClick={handleExportPDF}
@@ -586,6 +604,16 @@ export const ProjectsAndHistory: React.FC<ProjectsAndHistoryProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Import Cubicación from Excel Modal */}
+      {onAddMultipleItemsToProject && (
+        <ImportCubicacionModal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          basePriceKgCLP={basePriceKgCLP}
+          onImportItems={(items) => onAddMultipleItemsToProject(items, activeProject?.id)}
+        />
       )}
 
     </div>

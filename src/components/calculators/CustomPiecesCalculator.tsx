@@ -1,29 +1,21 @@
 import React, { useState } from "react";
 import { 
   Box, 
-  Circle, 
   Layers, 
   PlusCircle, 
   Save, 
   Trash2, 
-  Sparkles, 
   Info, 
   Check, 
-  Maximize2, 
-  Minimize2, 
   FileSpreadsheet, 
   Scissors, 
   Compass, 
-  Wrench, 
   Package, 
-  RotateCcw,
-  Sliders,
-  ChevronDown
+  Sliders
 } from "lucide-react";
 import { 
   calculateCustomPiece, 
   ENGINEERING_MATERIALS, 
-  MaterialDensityOption, 
   CustomPieceResult 
 } from "../../utils/steelCalculations";
 import { SteelProject } from "../../types";
@@ -52,22 +44,9 @@ interface CustomPiecesCalculatorProps {
   activeProject?: SteelProject;
 }
 
-export type PieceShapeType = 
-  | "bloque-prisma" 
-  | "cilindro-eje" 
-  | "buje-tubo-macizo" 
-  | "disco-plato" 
-  | "brida-flange" 
-  | "barra-hexagonal" 
-  | "tronco-cono" 
-  | "esfera" 
-  | "cartela-triangulo" 
-  | "cartela-trapecio";
-
 export interface PartListItem {
   id: string;
   name: string;
-  shape: PieceShapeType;
   dimensionsSummary: string;
   materialName: string;
   density: number;
@@ -80,33 +59,12 @@ export interface PartListItem {
 
 export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
   onAddToProject,
-  onSaveToHistory,
-  activeProject
+  onSaveToHistory
 }) => {
-  // Shape & Category
-  const [selectedShape, setSelectedShape] = useState<PieceShapeType>("bloque-prisma");
-  
-  // Dimensions State
+  // Dimensions State (Rectangular Block / Plate Cut: L x W x H)
   const [lengthMm, setLengthMm] = useState<number>(300);
   const [widthMm, setWidthMm] = useState<number>(150);
   const [heightMm, setHeightMm] = useState<number>(40);
-  const [thicknessMm, setThicknessMm] = useState<number>(20);
-  
-  // Diameters & Radii
-  const [outerDiameterMm, setOuterDiameterMm] = useState<number>(120);
-  const [innerDiameterMm, setInnerDiameterMm] = useState<number>(60);
-  const [diameterMajorMm, setDiameterMajorMm] = useState<number>(140);
-  const [diameterMinorMm, setDiameterMinorMm] = useState<number>(70);
-  const [hexWidthAcrossFlatsMm, setHexWidthAcrossFlatsMm] = useState<number>(46);
-  
-  // Gusset / Trapezoid
-  const [baseMajorMm, setBaseMajorMm] = useState<number>(250);
-  const [baseMinorMm, setBaseMinorMm] = useState<number>(120);
-  const [cornerCutMm, setCornerCutMm] = useState<number>(25);
-
-  // Holes / Flange
-  const [numHoles, setNumHoles] = useState<number>(6);
-  const [holeDiameterMm, setHoleDiameterMm] = useState<number>(18);
 
   // Material & Density
   const [selectedMaterialId, setSelectedMaterialId] = useState<string>("carbon-steel-std");
@@ -160,23 +118,11 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
 
   // Calculate Single Piece Result
   const result: CustomPieceResult = calculateCustomPiece({
-    shape: selectedShape,
+    shape: "bloque-prisma",
     dimensions: {
       lengthMm,
       widthMm,
-      heightMm,
-      thicknessMm,
-      outerDiameterMm,
-      innerDiameterMm,
-      diameterMm: outerDiameterMm,
-      diameterMajorMm,
-      diameterMinorMm,
-      hexWidthAcrossFlatsMm,
-      baseMajorMm,
-      baseMinorMm,
-      cornerCutMm,
-      numHoles,
-      holeDiameterMm
+      heightMm
     },
     densityGcm3: currentDensity,
     quantity,
@@ -186,29 +132,15 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
   const unitPriceCLP = Math.round(result.unitWeightKg * pricePerKgCLP);
   const totalPriceCLP = Math.round(result.totalWeightKg * pricePerKgCLP);
 
-  // Quick Preset Presets for Quick Testing in Workshops
-  const applyPreset = (preset: {
-    shape: PieceShapeType;
-    title: string;
-    dims: Record<string, number>;
-  }) => {
-    setSelectedShape(preset.shape);
-    if (preset.dims.lengthMm !== undefined) setLengthMm(preset.dims.lengthMm);
-    if (preset.dims.widthMm !== undefined) setWidthMm(preset.dims.widthMm);
-    if (preset.dims.heightMm !== undefined) setHeightMm(preset.dims.heightMm);
-    if (preset.dims.thicknessMm !== undefined) setThicknessMm(preset.dims.thicknessMm);
-    if (preset.dims.outerDiameterMm !== undefined) setOuterDiameterMm(preset.dims.outerDiameterMm);
-    if (preset.dims.innerDiameterMm !== undefined) setInnerDiameterMm(preset.dims.innerDiameterMm);
-    if (preset.dims.diameterMajorMm !== undefined) setDiameterMajorMm(preset.dims.diameterMajorMm);
-    if (preset.dims.diameterMinorMm !== undefined) setDiameterMinorMm(preset.dims.diameterMinorMm);
-    if (preset.dims.hexWidthAcrossFlatsMm !== undefined) setHexWidthAcrossFlatsMm(preset.dims.hexWidthAcrossFlatsMm);
-    if (preset.dims.baseMajorMm !== undefined) setBaseMajorMm(preset.dims.baseMajorMm);
-    if (preset.dims.baseMinorMm !== undefined) setBaseMinorMm(preset.dims.baseMinorMm);
-    if (preset.dims.cornerCutMm !== undefined) setCornerCutMm(preset.dims.cornerCutMm);
-    if (preset.dims.numHoles !== undefined) setNumHoles(preset.dims.numHoles);
-    if (preset.dims.holeDiameterMm !== undefined) setHoleDiameterMm(preset.dims.holeDiameterMm);
+  // Quick Presets for Fast Maestranza Tasks
+  const applyPreset = (preset: { title: string; l: number; w: number; h: number }) => {
+    setLengthMm(preset.l);
+    setWidthMm(preset.w);
+    setHeightMm(preset.h);
     setCustomTitle(preset.title);
   };
+
+  const getDimensionsSummaryString = (): string => `${lengthMm}x${widthMm}x${heightMm} mm`;
 
   // Add to Parts Assembly List
   const handleAddToList = () => {
@@ -216,7 +148,6 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
     const newItem: PartListItem = {
       id: `part-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       name: itemTitle,
-      shape: selectedShape,
       dimensionsSummary: getDimensionsSummaryString(),
       materialName: selectedMaterial?.name || `Personalizado (${currentDensity} g/cm³)`,
       density: currentDensity,
@@ -239,33 +170,6 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
   const handleClearList = () => {
     if (window.confirm("¿Deseas vaciar toda la lista de despiece?")) {
       setPartsList([]);
-    }
-  };
-
-  const getDimensionsSummaryString = (): string => {
-    switch (selectedShape) {
-      case "bloque-prisma":
-        return `${lengthMm}x${widthMm}x${heightMm} mm`;
-      case "cilindro-eje":
-        return `⌀${outerDiameterMm} x L=${lengthMm} mm`;
-      case "buje-tubo-macizo":
-        return `⌀ext ${outerDiameterMm} / ⌀int ${innerDiameterMm} x L=${lengthMm} mm`;
-      case "disco-plato":
-        return `⌀${outerDiameterMm} x e=${thicknessMm} mm`;
-      case "brida-flange":
-        return `⌀${outerDiameterMm}/⌀${innerDiameterMm} x ${thicknessMm}mm (${numHoles}x⌀${holeDiameterMm})`;
-      case "barra-hexagonal":
-        return `S=${hexWidthAcrossFlatsMm}mm x L=${lengthMm}mm`;
-      case "tronco-cono":
-        return `⌀${diameterMajorMm}/⌀${diameterMinorMm} x H=${heightMm}mm`;
-      case "esfera":
-        return `⌀${outerDiameterMm} mm`;
-      case "cartela-triangulo":
-        return `${baseMajorMm}x${heightMm}x${thicknessMm} mm (c=${cornerCutMm}mm)`;
-      case "cartela-trapecio":
-        return `B1=${baseMajorMm} B2=${baseMinorMm} H=${heightMm} e=${thicknessMm} mm`;
-      default:
-        return `${lengthMm}x${widthMm}x${thicknessMm} mm`;
     }
   };
 
@@ -322,7 +226,7 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
       title: `${title}`,
       summary: `${quantity} pza(s) ${getDimensionsSummaryString()} (${matDesc}) = ${result.totalWeightKg} kg ($${totalPriceCLP.toLocaleString("es-CL")} CLP)`,
       details: {
-        shape: selectedShape,
+        shape: "bloque-prisma",
         dimensions: getDimensionsSummaryString(),
         material: matDesc,
         density: currentDensity,
@@ -338,7 +242,7 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
       },
       weightKg: result.totalWeightKg,
       priceCLP: totalPriceCLP,
-      tags: ["Pieza Mecanizada", selectedShape, `${currentDensity} g/cm³`]
+      tags: ["Corte Rectangular", "Placa / Bloque", `${currentDensity} g/cm³`]
     });
 
     setFeedbackMsg("¡Cálculo guardado en el historial!");
@@ -362,13 +266,13 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
             </div>
             <div>
               <h2 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                Calculadora Universal de Piezas & Sólidos
+                Piezas a Medida — Cortes Rectangulares
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-sky-500/20 text-sky-400 border border-sky-400/30">
-                  Maestranza & Tornería
+                  Placa / Bloque
                 </span>
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Ingresa las medidas exactas de cualquier pieza, bloque, eje, buje, disco o refuerzo y obtén su peso, volumen y merma en tiempo real.
+                Ingresa largo, ancho y espesor de cualquier corte cuadrado o rectangular de placa y obtén su peso, volumen y costo al instante.
               </p>
             </div>
           </div>
@@ -422,90 +326,42 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
       {activeSubTab === "single" && (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
-          {/* Left / Center Column: Shapes & Dimension Controls (7 cols) */}
+          {/* Left / Center Column: Dimension Controls (7 cols) */}
           <div className="lg:col-span-7 space-y-5">
             
-            {/* Shape Geometry Selector Grid */}
+            {/* Quick Presets */}
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-3">
               <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center justify-between">
-                <span>1. Selecciona la Forma / Geometría de la Pieza</span>
-                <span className="text-slate-500 text-[11px] font-normal lowercase">10 figuras 3D</span>
+                <span>1. Dimensiones del Corte (en milímetros)</span>
+                <span className="text-sky-400 font-mono text-xs">{getDimensionsSummaryString()}</span>
               </label>
 
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                {[
-                  { id: "bloque-prisma", label: "Bloque / Prisma", desc: "L x W x H", icon: Box },
-                  { id: "cilindro-eje", label: "Eje / Barra", desc: "⌀D x L", icon: Circle },
-                  { id: "buje-tubo-macizo", label: "Buje / Camisa", desc: "⌀ext / ⌀int x L", icon: Circle },
-                  { id: "disco-plato", label: "Disco / Plato", desc: "⌀D x e", icon: Circle },
-                  { id: "brida-flange", label: "Brida / Flange", desc: "⌀OD/ID + Pernos", icon: Circle },
-                  { id: "barra-hexagonal", label: "Hexagonal", desc: "Entre caras S x L", icon: Box },
-                  { id: "tronco-cono", label: "Tronco Cónico", desc: "⌀D1/⌀D2 x H", icon: Compass },
-                  { id: "esfera", label: "Esfera Maciza", desc: "⌀D Bola", icon: Circle },
-                  { id: "cartela-triangulo", label: "Cartela Triang.", desc: "B x H x e", icon: Layers },
-                  { id: "cartela-trapecio", label: "Cartela Trapecio", desc: "B1/B2 x H x e", icon: Layers },
-                ].map((s) => {
-                  const Icon = s.icon;
-                  const isSelected = selectedShape === s.id;
-                  return (
-                    <button
-                      key={s.id}
-                      onClick={() => {
-                        setSelectedShape(s.id as PieceShapeType);
-                        setCustomTitle("");
-                      }}
-                      className={`p-2.5 rounded-lg border text-left flex flex-col justify-between transition-all cursor-pointer ${
-                        isSelected
-                          ? "bg-sky-500 text-slate-950 border-sky-400 shadow-md font-bold"
-                          : "bg-slate-950/60 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-800/40"
-                      }`}
-                    >
-                      <div className="flex items-center justify-between w-full mb-1">
-                        <Icon className={`w-4 h-4 ${isSelected ? "text-slate-950" : "text-sky-400"}`} />
-                        {isSelected && <Check className="w-3.5 h-3.5 text-slate-950" />}
-                      </div>
-                      <span className="text-xs leading-tight font-semibold block">{s.label}</span>
-                      <span className={`text-[10px] font-mono block mt-0.5 ${isSelected ? "text-slate-800" : "text-slate-500"}`}>
-                        {s.desc}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Quick Presets for Fast Maestranza Tasks */}
-              <div className="pt-2 border-t border-slate-800/80">
+              <div className="pt-1">
                 <span className="text-[11px] font-semibold text-slate-400 mr-2">Medidas típicas rápidas:</span>
                 <div className="flex flex-wrap gap-1.5 mt-1.5">
                   <button
-                    onClick={() => applyPreset({ shape: "bloque-prisma", title: "Placa Base 200x200x16", dims: { lengthMm: 200, widthMm: 200, heightMm: 16 } })}
+                    onClick={() => applyPreset({ title: "Placa Base 200x200x16", l: 200, w: 200, h: 16 })}
                     className="px-2 py-1 rounded text-[11px] bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 cursor-pointer"
                   >
                     Placa Base 200x200x16mm
                   </button>
                   <button
-                    onClick={() => applyPreset({ shape: "cilindro-eje", title: "Eje Transmisión ⌀50x500", dims: { outerDiameterMm: 50, lengthMm: 500 } })}
-                    className="px-2 py-1 rounded text-[11px] bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 cursor-pointer"
-                  >
-                    Eje ⌀50x500mm
-                  </button>
-                  <button
-                    onClick={() => applyPreset({ shape: "buje-tubo-macizo", title: "Buje ⌀100/⌀60x120", dims: { outerDiameterMm: 100, innerDiameterMm: 60, lengthMm: 120 } })}
-                    className="px-2 py-1 rounded text-[11px] bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 cursor-pointer"
-                  >
-                    Buje ⌀100/⌀60x120mm
-                  </button>
-                  <button
-                    onClick={() => applyPreset({ shape: "brida-flange", title: "Flange ⌀200/⌀80 e=20 4x⌀18", dims: { outerDiameterMm: 200, innerDiameterMm: 80, thicknessMm: 20, numHoles: 4, holeDiameterMm: 18 } })}
-                    className="px-2 py-1 rounded text-[11px] bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 cursor-pointer"
-                  >
-                    Flange ⌀200/80 e=20mm
-                  </button>
-                  <button
-                    onClick={() => applyPreset({ shape: "cartela-triangulo", title: "Gusset Refuerzo 150x150x10", dims: { baseMajorMm: 150, heightMm: 150, thicknessMm: 10, cornerCutMm: 20 } })}
+                    onClick={() => applyPreset({ title: "Cartela Refuerzo 150x150x10", l: 150, w: 150, h: 10 })}
                     className="px-2 py-1 rounded text-[11px] bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 cursor-pointer"
                   >
                     Cartela 150x150x10mm
+                  </button>
+                  <button
+                    onClick={() => applyPreset({ title: "Plancha Base Columna 300x300x20", l: 300, w: 300, h: 20 })}
+                    className="px-2 py-1 rounded text-[11px] bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 cursor-pointer"
+                  >
+                    Base Columna 300x300x20mm
+                  </button>
+                  <button
+                    onClick={() => applyPreset({ title: "Placa Nudo 250x120x12", l: 250, w: 120, h: 12 })}
+                    className="px-2 py-1 rounded text-[11px] bg-slate-800/80 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 cursor-pointer"
+                  >
+                    Placa Nudo 250x120x12mm
                   </button>
                 </div>
               </div>
@@ -513,343 +369,97 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
 
             {/* Dimension Sliders & Inputs */}
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-4">
-              <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center justify-between">
-                <span>2. Dimensiones de la Pieza (en milímetros)</span>
-                <span className="text-sky-400 font-mono text-xs">{getDimensionsSummaryString()}</span>
-              </label>
-
               <div className="space-y-3.5">
                 
-                {/* Length L (Bloque, Eje, Buje, Hexágono) */}
-                {(selectedShape === "bloque-prisma" || selectedShape === "cilindro-eje" || selectedShape === "buje-tubo-macizo" || selectedShape === "barra-hexagonal") && (
-                  <div 
-                    onMouseEnter={() => setHoveredDimension("length")}
-                    onMouseLeave={() => setHoveredDimension(null)}
-                    className={`p-3 rounded-lg border transition-all ${hoveredDimension === "length" ? "bg-sky-500/10 border-sky-400" : "bg-slate-950/60 border-slate-800"}`}
-                  >
-                    <div className="flex justify-between items-center mb-1 text-xs">
-                      <span className="font-semibold text-slate-200">Longitud / Largo Total (L)</span>
-                      <span className="font-mono font-bold text-sky-400">{lengthMm} mm ({(lengthMm / 10).toFixed(1)} cm)</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="range"
-                        min="1"
-                        max="3000"
-                        step="1"
-                        value={lengthMm}
-                        onChange={(e) => setLengthMm(parseFloat(e.target.value) || 1)}
-                        className="w-full accent-sky-500"
-                      />
-                      <input
-                        type="number"
-                        min="0.1"
-                        value={lengthMm}
-                        onChange={(e) => setLengthMm(parseFloat(e.target.value) || 0)}
-                        className="w-24 bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                      />
-                    </div>
+                {/* Length L */}
+                <div 
+                  onMouseEnter={() => setHoveredDimension("length")}
+                  onMouseLeave={() => setHoveredDimension(null)}
+                  className={`p-3 rounded-lg border transition-all ${hoveredDimension === "length" ? "bg-sky-500/10 border-sky-400" : "bg-slate-950/60 border-slate-800"}`}
+                >
+                  <div className="flex justify-between items-center mb-1 text-xs">
+                    <span className="font-semibold text-slate-200">Longitud / Largo (L)</span>
+                    <span className="font-mono font-bold text-sky-400">{lengthMm} mm ({(lengthMm / 10).toFixed(1)} cm)</span>
                   </div>
-                )}
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="1"
+                      max="3000"
+                      step="1"
+                      value={lengthMm}
+                      onChange={(e) => setLengthMm(parseFloat(e.target.value) || 1)}
+                      className="w-full accent-sky-500"
+                    />
+                    <input
+                      type="number"
+                      min="0.1"
+                      value={lengthMm}
+                      onChange={(e) => setLengthMm(parseFloat(e.target.value) || 0)}
+                      className="w-24 bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
+                    />
+                  </div>
+                </div>
 
-                {/* Width W (Bloque) */}
-                {selectedShape === "bloque-prisma" && (
-                  <div 
-                    onMouseEnter={() => setHoveredDimension("width")}
-                    onMouseLeave={() => setHoveredDimension(null)}
-                    className={`p-3 rounded-lg border transition-all ${hoveredDimension === "width" ? "bg-sky-500/10 border-sky-400" : "bg-slate-950/60 border-slate-800"}`}
-                  >
-                    <div className="flex justify-between items-center mb-1 text-xs">
-                      <span className="font-semibold text-slate-200">Ancho (W o B)</span>
-                      <span className="font-mono font-bold text-sky-400">{widthMm} mm ({(widthMm / 10).toFixed(1)} cm)</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="range"
-                        min="1"
-                        max="2000"
-                        step="1"
-                        value={widthMm}
-                        onChange={(e) => setWidthMm(parseFloat(e.target.value) || 1)}
-                        className="w-full accent-sky-500"
-                      />
-                      <input
-                        type="number"
-                        min="0.1"
-                        value={widthMm}
-                        onChange={(e) => setWidthMm(parseFloat(e.target.value) || 0)}
-                        className="w-24 bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                      />
-                    </div>
+                {/* Width W */}
+                <div 
+                  onMouseEnter={() => setHoveredDimension("width")}
+                  onMouseLeave={() => setHoveredDimension(null)}
+                  className={`p-3 rounded-lg border transition-all ${hoveredDimension === "width" ? "bg-sky-500/10 border-sky-400" : "bg-slate-950/60 border-slate-800"}`}
+                >
+                  <div className="flex justify-between items-center mb-1 text-xs">
+                    <span className="font-semibold text-slate-200">Ancho (W o B)</span>
+                    <span className="font-mono font-bold text-sky-400">{widthMm} mm ({(widthMm / 10).toFixed(1)} cm)</span>
                   </div>
-                )}
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="1"
+                      max="2000"
+                      step="1"
+                      value={widthMm}
+                      onChange={(e) => setWidthMm(parseFloat(e.target.value) || 1)}
+                      className="w-full accent-sky-500"
+                    />
+                    <input
+                      type="number"
+                      min="0.1"
+                      value={widthMm}
+                      onChange={(e) => setWidthMm(parseFloat(e.target.value) || 0)}
+                      className="w-24 bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
+                    />
+                  </div>
+                </div>
 
-                {/* Height / Thickness H (Bloque, Tronco Cono, Cartelas) */}
-                {(selectedShape === "bloque-prisma" || selectedShape === "tronco-cono" || selectedShape === "cartela-triangulo" || selectedShape === "cartela-trapecio") && (
-                  <div 
-                    onMouseEnter={() => setHoveredDimension("height")}
-                    onMouseLeave={() => setHoveredDimension(null)}
-                    className={`p-3 rounded-lg border transition-all ${hoveredDimension === "height" ? "bg-sky-500/10 border-sky-400" : "bg-slate-950/60 border-slate-800"}`}
-                  >
-                    <div className="flex justify-between items-center mb-1 text-xs">
-                      <span className="font-semibold text-slate-200">
-                        {selectedShape === "bloque-prisma" ? "Altura / Espesor (H)" : "Altura (H)"}
-                      </span>
-                      <span className="font-mono font-bold text-sky-400">{heightMm} mm</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="range"
-                        min="1"
-                        max="1000"
-                        step="1"
-                        value={heightMm}
-                        onChange={(e) => setHeightMm(parseFloat(e.target.value) || 1)}
-                        className="w-full accent-sky-500"
-                      />
-                      <input
-                        type="number"
-                        min="0.1"
-                        value={heightMm}
-                        onChange={(e) => setHeightMm(parseFloat(e.target.value) || 0)}
-                        className="w-24 bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                      />
-                    </div>
+                {/* Height / Thickness H */}
+                <div 
+                  onMouseEnter={() => setHoveredDimension("height")}
+                  onMouseLeave={() => setHoveredDimension(null)}
+                  className={`p-3 rounded-lg border transition-all ${hoveredDimension === "height" ? "bg-sky-500/10 border-sky-400" : "bg-slate-950/60 border-slate-800"}`}
+                >
+                  <div className="flex justify-between items-center mb-1 text-xs">
+                    <span className="font-semibold text-slate-200">Altura / Espesor (H)</span>
+                    <span className="font-mono font-bold text-sky-400">{heightMm} mm</span>
                   </div>
-                )}
-
-                {/* Outer Diameter OD / D (Eje, Buje, Disco, Brida, Esfera) */}
-                {(selectedShape === "cilindro-eje" || selectedShape === "buje-tubo-macizo" || selectedShape === "disco-plato" || selectedShape === "brida-flange" || selectedShape === "esfera") && (
-                  <div 
-                    onMouseEnter={() => setHoveredDimension("outerDiameter")}
-                    onMouseLeave={() => setHoveredDimension(null)}
-                    className={`p-3 rounded-lg border transition-all ${hoveredDimension === "outerDiameter" ? "bg-sky-500/10 border-sky-400" : "bg-slate-950/60 border-slate-800"}`}
-                  >
-                    <div className="flex justify-between items-center mb-1 text-xs">
-                      <span className="font-semibold text-slate-200">
-                        {selectedShape === "buje-tubo-macizo" || selectedShape === "brida-flange" ? "Diámetro Exterior (⌀ OD)" : "Diámetro Exterior (⌀ D)"}
-                      </span>
-                      <span className="font-mono font-bold text-sky-400">{outerDiameterMm} mm (⌀{(outerDiameterMm / 25.4).toFixed(2)}")</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="range"
-                        min="2"
-                        max="1500"
-                        step="1"
-                        value={outerDiameterMm}
-                        onChange={(e) => setOuterDiameterMm(parseFloat(e.target.value) || 2)}
-                        className="w-full accent-sky-500"
-                      />
-                      <input
-                        type="number"
-                        min="1"
-                        value={outerDiameterMm}
-                        onChange={(e) => setOuterDiameterMm(parseFloat(e.target.value) || 0)}
-                        className="w-24 bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                      />
-                    </div>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="range"
+                      min="1"
+                      max="1000"
+                      step="1"
+                      value={heightMm}
+                      onChange={(e) => setHeightMm(parseFloat(e.target.value) || 1)}
+                      className="w-full accent-sky-500"
+                    />
+                    <input
+                      type="number"
+                      min="0.1"
+                      value={heightMm}
+                      onChange={(e) => setHeightMm(parseFloat(e.target.value) || 0)}
+                      className="w-24 bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
+                    />
                   </div>
-                )}
-
-                {/* Inner Diameter ID / Barreno (Buje, Brida) */}
-                {(selectedShape === "buje-tubo-macizo" || selectedShape === "brida-flange") && (
-                  <div 
-                    onMouseEnter={() => setHoveredDimension("innerDiameter")}
-                    onMouseLeave={() => setHoveredDimension(null)}
-                    className={`p-3 rounded-lg border transition-all ${hoveredDimension === "innerDiameter" ? "bg-sky-500/10 border-sky-400" : "bg-slate-950/60 border-slate-800"}`}
-                  >
-                    <div className="flex justify-between items-center mb-1 text-xs">
-                      <span className="font-semibold text-slate-200">Diámetro Interior / Barreno (⌀ ID)</span>
-                      <span className="font-mono font-bold text-cyan-400">{innerDiameterMm} mm (Pared: {((outerDiameterMm - innerDiameterMm) / 2).toFixed(1)} mm)</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="range"
-                        min="0"
-                        max={Math.max(1, outerDiameterMm - 1)}
-                        step="1"
-                        value={innerDiameterMm}
-                        onChange={(e) => setInnerDiameterMm(Math.min(outerDiameterMm - 1, parseFloat(e.target.value) || 0))}
-                        className="w-full accent-cyan-500"
-                      />
-                      <input
-                        type="number"
-                        min="0"
-                        max={outerDiameterMm - 1}
-                        value={innerDiameterMm}
-                        onChange={(e) => setInnerDiameterMm(Math.min(outerDiameterMm - 1, parseFloat(e.target.value) || 0))}
-                        className="w-24 bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Thickness e (Disco, Brida, Cartelas) */}
-                {(selectedShape === "disco-plato" || selectedShape === "brida-flange" || selectedShape === "cartela-triangulo" || selectedShape === "cartela-trapecio") && (
-                  <div 
-                    onMouseEnter={() => setHoveredDimension("thickness")}
-                    onMouseLeave={() => setHoveredDimension(null)}
-                    className={`p-3 rounded-lg border transition-all ${hoveredDimension === "thickness" ? "bg-sky-500/10 border-sky-400" : "bg-slate-950/60 border-slate-800"}`}
-                  >
-                    <div className="flex justify-between items-center mb-1 text-xs">
-                      <span className="font-semibold text-slate-200">Espesor de Plancha / Chapa (e)</span>
-                      <span className="font-mono font-bold text-sky-400">{thicknessMm} mm</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="range"
-                        min="1"
-                        max="200"
-                        step="0.5"
-                        value={thicknessMm}
-                        onChange={(e) => setThicknessMm(parseFloat(e.target.value) || 1)}
-                        className="w-full accent-sky-500"
-                      />
-                      <input
-                        type="number"
-                        min="0.5"
-                        step="0.5"
-                        value={thicknessMm}
-                        onChange={(e) => setThicknessMm(parseFloat(e.target.value) || 0)}
-                        className="w-24 bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Hexagon across flats S */}
-                {selectedShape === "barra-hexagonal" && (
-                  <div 
-                    onMouseEnter={() => setHoveredDimension("hexWidth")}
-                    onMouseLeave={() => setHoveredDimension(null)}
-                    className={`p-3 rounded-lg border transition-all ${hoveredDimension === "hexWidth" ? "bg-sky-500/10 border-sky-400" : "bg-slate-950/60 border-slate-800"}`}
-                  >
-                    <div className="flex justify-between items-center mb-1 text-xs">
-                      <span className="font-semibold text-slate-200">Distancia Entre Caras Planas (S / Llave)</span>
-                      <span className="font-mono font-bold text-sky-400">{hexWidthAcrossFlatsMm} mm</span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <input
-                        type="range"
-                        min="5"
-                        max="250"
-                        step="1"
-                        value={hexWidthAcrossFlatsMm}
-                        onChange={(e) => setHexWidthAcrossFlatsMm(parseFloat(e.target.value) || 5)}
-                        className="w-full accent-sky-500"
-                      />
-                      <input
-                        type="number"
-                        min="1"
-                        value={hexWidthAcrossFlatsMm}
-                        onChange={(e) => setHexWidthAcrossFlatsMm(parseFloat(e.target.value) || 0)}
-                        className="w-24 bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Cone Diameters D1 & D2 */}
-                {selectedShape === "tronco-cono" && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
-                      <div className="flex justify-between items-center mb-1 text-xs">
-                        <span className="font-semibold text-slate-200">Diámetro Mayor (⌀ D1)</span>
-                        <span className="font-mono font-bold text-sky-400">{diameterMajorMm} mm</span>
-                      </div>
-                      <input
-                        type="number"
-                        min="1"
-                        value={diameterMajorMm}
-                        onChange={(e) => setDiameterMajorMm(parseFloat(e.target.value) || 0)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                      />
-                    </div>
-                    <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
-                      <div className="flex justify-between items-center mb-1 text-xs">
-                        <span className="font-semibold text-slate-200">Diámetro Menor (⌀ D2)</span>
-                        <span className="font-mono font-bold text-sky-400">{diameterMinorMm} mm</span>
-                      </div>
-                      <input
-                        type="number"
-                        min="1"
-                        value={diameterMinorMm}
-                        onChange={(e) => setDiameterMinorMm(parseFloat(e.target.value) || 0)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Flange Bolt Holes */}
-                {selectedShape === "brida-flange" && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-lg bg-slate-950/60 border border-slate-800">
-                    <div>
-                      <span className="text-xs font-semibold text-slate-300 block mb-1">N° de Perforaciones / Pernos</span>
-                      <input
-                        type="number"
-                        min="0"
-                        max="32"
-                        value={numHoles}
-                        onChange={(e) => setNumHoles(parseInt(e.target.value) || 0)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                      />
-                    </div>
-                    <div>
-                      <span className="text-xs font-semibold text-slate-300 block mb-1">Diámetro Barrenos (⌀ mm)</span>
-                      <input
-                        type="number"
-                        min="0"
-                        max="100"
-                        value={holeDiameterMm}
-                        onChange={(e) => setHoleDiameterMm(parseFloat(e.target.value) || 0)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Gusset Bases & Corner Cut */}
-                {(selectedShape === "cartela-triangulo" || selectedShape === "cartela-trapecio") && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
-                      <span className="text-xs font-semibold text-slate-300 block mb-1">
-                        {selectedShape === "cartela-triangulo" ? "Base (B)" : "Base Mayor (B1)"}
-                      </span>
-                      <input
-                        type="number"
-                        min="1"
-                        value={baseMajorMm}
-                        onChange={(e) => setBaseMajorMm(parseFloat(e.target.value) || 0)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                      />
-                    </div>
-                    {selectedShape === "cartela-trapecio" ? (
-                      <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
-                        <span className="text-xs font-semibold text-slate-300 block mb-1">Base Menor (B2)</span>
-                        <input
-                          type="number"
-                          min="1"
-                          value={baseMinorMm}
-                          onChange={(e) => setBaseMinorMm(parseFloat(e.target.value) || 0)}
-                          className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                        />
-                      </div>
-                    ) : (
-                      <div className="p-3 rounded-lg bg-slate-950/60 border border-slate-800">
-                        <span className="text-xs font-semibold text-slate-300 block mb-1">Despunte / Chaflán Esquina (c)</span>
-                        <input
-                          type="number"
-                          min="0"
-                          value={cornerCutMm}
-                          onChange={(e) => setCornerCutMm(parseFloat(e.target.value) || 0)}
-                          className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-xs text-white font-mono text-center font-bold"
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
+                </div>
 
               </div>
             </div>
@@ -860,7 +470,7 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
                 <div className="flex items-center gap-2">
                   <Scissors className="w-4 h-4 text-amber-400" />
                   <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                    Descuento por Vaciados / Barrenos (Mecanizado Torno/Fresa)
+                    Descuento por Perforaciones / Cajeras
                   </span>
                 </div>
                 <button
@@ -884,7 +494,7 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {/* Bore Holes */}
                     <div className="p-3 rounded-lg bg-slate-950/80 border border-slate-800 space-y-2">
-                      <span className="text-xs font-bold text-amber-400 block">Barrenos Cilíndricos</span>
+                      <span className="text-xs font-bold text-amber-400 block">Perforaciones Circulares</span>
                       <div className="grid grid-cols-3 gap-1.5 text-[11px]">
                         <div>
                           <label className="text-slate-400 block mb-0.5">Cant.</label>
@@ -972,13 +582,13 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
 
           </div>
 
-          {/* Right Column: Material Selector, 2D CAD Preview & Results (5 cols) */}
+          {/* Right Column: Material Selector, CAD Preview & Results (5 cols) */}
           <div className="lg:col-span-5 space-y-5">
             
             {/* Material & Density Selector */}
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-3">
               <label className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center justify-between">
-                <span>3. Material & Densidad</span>
+                <span>2. Material & Densidad</span>
                 <span className="text-emerald-400 font-mono font-bold text-xs">{currentDensity.toFixed(2)} g/cm³</span>
               </label>
 
@@ -1084,7 +694,7 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
               </div>
             </div>
 
-            {/* Live Interactive 2D/3D CAD SVG Diagram */}
+            {/* Live Interactive CAD SVG Diagram */}
             <div className="p-4 rounded-xl bg-slate-900 border border-slate-800 shadow-sm space-y-2">
               <div className="flex items-center justify-between text-xs text-slate-400">
                 <span className="font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
@@ -1095,7 +705,6 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
               </div>
 
               <div className="w-full h-56 bg-slate-950 rounded-lg border border-slate-800 relative flex items-center justify-center overflow-hidden">
-                {/* Millimeter Blueprint Grid Effect */}
                 <div className="absolute inset-0 opacity-15 bg-[radial-gradient(#38bdf8_1px,transparent_1px)] [background-size:12px_12px]" />
 
                 <svg viewBox="0 0 300 200" className="w-full h-full relative z-10">
@@ -1103,159 +712,22 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
                     <marker id="arrow-cad" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
                       <path d="M 0 0 L 10 5 L 0 10 z" fill="#38bdf8" />
                     </marker>
-                    <linearGradient id="metalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                      <stop offset="0%" stopColor="#334155" />
-                      <stop offset="50%" stopColor="#1e293b" />
-                      <stop offset="100%" stopColor="#0f172a" />
-                    </linearGradient>
                   </defs>
 
-                  {/* 1. Rectangular Block */}
-                  {selectedShape === "bloque-prisma" && (
-                    <g transform="translate(150, 100)">
-                      {/* Isometric-like 3D Block projection */}
-                      <path d="M -70 10 L 10 40 L 70 10 L -10 -20 Z" fill="#334155" stroke="#64748b" strokeWidth="1.5" />
-                      <path d="M -70 10 L -70 -20 L -10 -50 L -10 -20 Z" fill="#1e293b" stroke="#64748b" strokeWidth="1.5" />
-                      <path d="M -10 -20 L -10 -50 L 70 -20 L 70 10 Z" fill="#0f172a" stroke="#64748b" strokeWidth="1.5" />
+                  <g transform="translate(150, 100)">
+                    <path d="M -70 10 L 10 40 L 70 10 L -10 -20 Z" fill="#334155" stroke="#64748b" strokeWidth="1.5" />
+                    <path d="M -70 10 L -70 -20 L -10 -50 L -10 -20 Z" fill="#1e293b" stroke="#64748b" strokeWidth="1.5" />
+                    <path d="M -10 -20 L -10 -50 L 70 -20 L 70 10 Z" fill="#0f172a" stroke="#64748b" strokeWidth="1.5" />
 
-                      {/* Dimension lines */}
-                      <line x1="-70" y1="22" x2="10" y2="52" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="-35" y="48" fill="#38bdf8" fontSize="9" fontWeight="bold" fontFamily="monospace">L={lengthMm}</text>
+                    <line x1="-70" y1="22" x2="10" y2="52" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
+                    <text x="-35" y="48" fill="#38bdf8" fontSize="9" fontWeight="bold" fontFamily="monospace">L={lengthMm}</text>
 
-                      <line x1="15" y1="52" x2="75" y2="22" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="50" y="48" fill="#38bdf8" fontSize="9" fontWeight="bold" fontFamily="monospace">W={widthMm}</text>
+                    <line x1="15" y1="52" x2="75" y2="22" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
+                    <text x="50" y="48" fill="#38bdf8" fontSize="9" fontWeight="bold" fontFamily="monospace">W={widthMm}</text>
 
-                      <line x1="82" y1="10" x2="82" y2="-20" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="88" y="-2" fill="#38bdf8" fontSize="9" fontWeight="bold" fontFamily="monospace">H={heightMm}</text>
-                    </g>
-                  )}
-
-                  {/* 2. Cylinder / Solid Bar */}
-                  {selectedShape === "cilindro-eje" && (
-                    <g transform="translate(150, 100)">
-                      <rect x="-80" y="-35" width="160" height="70" rx="0" fill="url(#metalGrad)" stroke="#64748b" strokeWidth="1.5" />
-                      <ellipse cx="-80" cy="0" rx="14" ry="35" fill="#334155" stroke="#94a3b8" strokeWidth="1.5" />
-                      <ellipse cx="80" cy="0" rx="14" ry="35" fill="#1e293b" stroke="#94a3b8" strokeWidth="1.5" />
-
-                      {/* Centerline */}
-                      <line x1="-100" y1="0" x2="100" y2="0" stroke="#0ea5e9" strokeWidth="0.8" strokeDasharray="4 3" />
-
-                      {/* Dimensions */}
-                      <line x1="-80" y1="-48" x2="80" y2="-48" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="0" y="-53" fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">L = {lengthMm} mm</text>
-
-                      <line x1="102" y1="-35" x2="102" y2="35" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="108" y="4" fill="#38bdf8" fontSize="10" fontWeight="bold" fontFamily="monospace">⌀{outerDiameterMm}</text>
-                    </g>
-                  )}
-
-                  {/* 3. Bushing / Hollow Cylinder */}
-                  {selectedShape === "buje-tubo-macizo" && (
-                    <g transform="translate(150, 100)">
-                      <rect x="-75" y="-35" width="150" height="70" fill="url(#metalGrad)" stroke="#64748b" strokeWidth="1.5" />
-                      {/* Outer Ellipse */}
-                      <ellipse cx="-75" cy="0" rx="14" ry="35" fill="#334155" stroke="#94a3b8" strokeWidth="1.5" />
-                      <ellipse cx="75" cy="0" rx="14" ry="35" fill="#1e293b" stroke="#94a3b8" strokeWidth="1.5" />
-                      {/* Inner Bore Ellipse */}
-                      <ellipse cx="75" cy="0" rx="8" ry="20" fill="#030712" stroke="#38bdf8" strokeWidth="1.5" />
-                      <line x1="-75" y1="-20" x2="75" y2="-20" stroke="#0ea5e9" strokeWidth="0.8" strokeDasharray="3 3" />
-                      <line x1="-75" y1="20" x2="75" y2="20" stroke="#0ea5e9" strokeWidth="0.8" strokeDasharray="3 3" />
-
-                      <line x1="-75" y1="-46" x2="75" y2="-46" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="0" y="-51" fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">L = {lengthMm}</text>
-                      <text x="92" y="-12" fill="#38bdf8" fontSize="9" fontWeight="bold" fontFamily="monospace">⌀OD={outerDiameterMm}</text>
-                      <text x="92" y="16" fill="#06b6d4" fontSize="9" fontWeight="bold" fontFamily="monospace">⌀ID={innerDiameterMm}</text>
-                    </g>
-                  )}
-
-                  {/* 4. Disc / Circular Plate */}
-                  {selectedShape === "disco-plato" && (
-                    <g transform="translate(150, 100)">
-                      <ellipse cx="0" cy="0" rx="65" ry="65" fill="url(#metalGrad)" stroke="#94a3b8" strokeWidth="2" />
-                      <line x1="-65" y1="0" x2="65" y2="0" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="0" y="-8" fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">⌀ {outerDiameterMm} mm</text>
-                      <text x="0" y="24" fill="#06b6d4" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">Espesor e = {thicknessMm} mm</text>
-                    </g>
-                  )}
-
-                  {/* 5. Flange with Bolt Holes */}
-                  {selectedShape === "brida-flange" && (
-                    <g transform="translate(150, 100)">
-                      <circle cx="0" cy="0" r="70" fill="url(#metalGrad)" stroke="#94a3b8" strokeWidth="2" />
-                      <circle cx="0" cy="0" r="30" fill="#030712" stroke="#38bdf8" strokeWidth="2" />
-                      <circle cx="0" cy="0" r="50" fill="none" stroke="#0ea5e9" strokeWidth="0.8" strokeDasharray="3 3" />
-                      {/* Bolt Holes based on numHoles */}
-                      {Array.from({ length: Math.min(12, Math.max(2, numHoles)) }).map((_, idx) => {
-                        const angle = (idx * 2 * Math.PI) / Math.min(12, Math.max(2, numHoles));
-                        const hx = 50 * Math.cos(angle);
-                        const hy = 50 * Math.sin(angle);
-                        return <circle key={idx} cx={hx} cy={hy} r="4.5" fill="#030712" stroke="#38bdf8" strokeWidth="1.2" />;
-                      })}
-                      <text x="0" y="-76" fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">⌀OD={outerDiameterMm} / ⌀ID={innerDiameterMm}</text>
-                      <text x="0" y="88" fill="#94a3b8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">{numHoles} Barrenos ⌀{holeDiameterMm}mm | e={thicknessMm}mm</text>
-                    </g>
-                  )}
-
-                  {/* 6. Hexagonal Bar */}
-                  {selectedShape === "barra-hexagonal" && (
-                    <g transform="translate(150, 100)">
-                      <polygon points="0,-45 40,-22 40,22 0,45 -40,22 -40,-22" fill="url(#metalGrad)" stroke="#94a3b8" strokeWidth="2" />
-                      <line x1="-40" y1="0" x2="40" y2="0" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="0" y="-8" fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">S = {hexWidthAcrossFlatsMm} mm</text>
-                      <text x="0" y="65" fill="#06b6d4" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">L = {lengthMm} mm</text>
-                    </g>
-                  )}
-
-                  {/* 7. Truncated Cone */}
-                  {selectedShape === "tronco-cono" && (
-                    <g transform="translate(150, 100)">
-                      <polygon points="-55,-35 55,-35 30,35 -30,35" fill="url(#metalGrad)" stroke="#94a3b8" strokeWidth="2" />
-                      <line x1="-55" y1="-45" x2="55" y2="-45" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="0" y="-50" fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">⌀D1 = {diameterMajorMm}</text>
-                      <line x1="-30" y1="45" x2="30" y2="45" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="0" y="58" fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">⌀D2 = {diameterMinorMm}</text>
-                      <line x1="65" y1="-35" x2="65" y2="35" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="70" y="4" fill="#38bdf8" fontSize="9" fontWeight="bold" fontFamily="monospace">H={heightMm}</text>
-                    </g>
-                  )}
-
-                  {/* 8. Sphere */}
-                  {selectedShape === "esfera" && (
-                    <g transform="translate(150, 100)">
-                      <circle cx="0" cy="0" r="55" fill="url(#metalGrad)" stroke="#94a3b8" strokeWidth="2" />
-                      <ellipse cx="0" cy="0" rx="55" ry="18" fill="none" stroke="#0ea5e9" strokeWidth="0.8" strokeDasharray="3 3" />
-                      <line x1="-55" y1="0" x2="55" y2="0" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="0" y="-6" fill="#38bdf8" fontSize="10" fontWeight="bold" textAnchor="middle" fontFamily="monospace">⌀ {outerDiameterMm} mm</text>
-                    </g>
-                  )}
-
-                  {/* 9. Triangular Gusset */}
-                  {selectedShape === "cartela-triangulo" && (
-                    <g transform="translate(150, 100)">
-                      {cornerCutMm > 0 ? (
-                        <polygon points="-60,-40 50,40 -60,40 -60,-20 -40,-40" fill="url(#metalGrad)" stroke="#94a3b8" strokeWidth="2" />
-                      ) : (
-                        <polygon points="-60,-40 50,40 -60,40" fill="url(#metalGrad)" stroke="#94a3b8" strokeWidth="2" />
-                      )}
-                      <line x1="-60" y1="52" x2="50" y2="52" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="-5" y="65" fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">Base = {baseMajorMm} mm</text>
-                      <line x1="-72" y1="-40" x2="-72" y2="40" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="-78" y="0" fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" transform="rotate(-90 -78 0)" fontFamily="monospace">H={heightMm}</text>
-                      <text x="10" y="-15" fill="#06b6d4" fontSize="9" fontWeight="bold" fontFamily="monospace">e={thicknessMm}</text>
-                    </g>
-                  )}
-
-                  {/* 10. Trapezoidal Gusset */}
-                  {selectedShape === "cartela-trapecio" && (
-                    <g transform="translate(150, 100)">
-                      <polygon points="-65,35 65,35 35,-35 -35,-35" fill="url(#metalGrad)" stroke="#94a3b8" strokeWidth="2" />
-                      <line x1="-65" y1="46" x2="65" y2="46" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="0" y="58" fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">B1 = {baseMajorMm} mm</text>
-                      <line x1="-35" y1="-44" x2="35" y2="-44" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
-                      <text x="0" y="-48" fill="#38bdf8" fontSize="9" fontWeight="bold" textAnchor="middle" fontFamily="monospace">B2 = {baseMinorMm} mm</text>
-                      <text x="50" y="0" fill="#06b6d4" fontSize="9" fontWeight="bold" fontFamily="monospace">H={heightMm} e={thicknessMm}</text>
-                    </g>
-                  )}
+                    <line x1="82" y1="10" x2="82" y2="-20" stroke="#38bdf8" strokeWidth="1.2" markerStart="url(#arrow-cad)" markerEnd="url(#arrow-cad)" />
+                    <text x="88" y="-2" fill="#38bdf8" fontSize="9" fontWeight="bold" fontFamily="monospace">H={heightMm}</text>
+                  </g>
                 </svg>
               </div>
             </div>
@@ -1313,7 +785,7 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
               {/* Raw Stock vs Machined Scrap if Machining Enabled */}
               {enableMachining && result.machinedScrapKg ? (
                 <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-xs flex items-center justify-between text-amber-300">
-                  <span>Tocho Bruto: <strong>{result.rawStockWeightKg} kg</strong></span>
+                  <span>Placa Bruta: <strong>{result.rawStockWeightKg} kg</strong></span>
                   <span>Viruta / Merma: <strong>{result.machinedScrapKg} kg ({result.scrapPercentage}%)</strong></span>
                 </div>
               ) : null}
@@ -1374,7 +846,7 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
                 Lista de Despiece & Cubicación de Ensamble
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Conjunto de piezas calculadas para una estructura, máquina o mecanizado completo.
+                Conjunto de cortes de placa calculados para una estructura o pedido completo.
               </p>
             </div>
 
@@ -1404,7 +876,7 @@ export const CustomPiecesCalculator: React.FC<CustomPiecesCalculatorProps> = ({
               <Box className="w-12 h-12 text-slate-600 mx-auto stroke-1" />
               <div className="text-sm font-semibold text-slate-300">No hay piezas agregadas a la lista de despiece</div>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
-                Utiliza el calculador de pieza para ingresar las medidas de tus piezas y haz clic en <strong>"Añadir a Despiece"</strong> para acumular el peso y costo del conjunto.
+                Utiliza el calculador de pieza para ingresar las medidas de tus cortes y haz clic en <strong>"Añadir a Despiece"</strong> para acumular el peso y costo del conjunto.
               </p>
               <button
                 onClick={() => setActiveSubTab("single")}

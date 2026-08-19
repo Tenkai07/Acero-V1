@@ -86,9 +86,9 @@ export const Navigation: React.FC<NavigationProps> = ({
     },
     {
       id: "catalog",
-      label: "Catálogo & Normas",
+      label: "Catálogo & Precios",
       shortLabel: "Catálogo",
-      subLabel: "Normas NCh, Chispas, Precios",
+      subLabel: "Identificación en Taller, Precios",
       icon: ShoppingBag
     },
     {

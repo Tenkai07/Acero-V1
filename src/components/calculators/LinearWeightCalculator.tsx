@@ -10,10 +10,14 @@ import {
   Info,
   DollarSign,
   TrendingUp,
-  Tag
+  Tag,
+  Ruler,
+  Target,
+  Sparkles
 } from "lucide-react";
 import { ProfileCategory, ProfileDefinition, ProjectItem, CalculationHistoryItem } from "../../types";
 import { STANDARD_CHILEAN_PROFILES } from "../../data/chileanSteelData";
+import { findMatchingProfiles, ProfileMatch } from "../../utils/profileDetector";
 
 interface LinearWeightCalculatorProps {
   onAddToProject: (item: Omit<ProjectItem, "id" | "dateAdded">) => void;
@@ -31,6 +35,13 @@ export const LinearWeightCalculator: React.FC<LinearWeightCalculatorProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<ProfileCategory | "all">("all");
   const [selectedProfileId, setSelectedProfileId] = useState<string>("hea-200");
   const [searchQuery, setSearchQuery] = useState<string>("");
+  const [searchMode, setSearchMode] = useState<"nombre" | "medidas">("nombre");
+
+  // Dimension Detector State
+  const [queryH, setQueryH] = useState<number | "">("");
+  const [queryB, setQueryB] = useState<number | "">("");
+  const [queryTw, setQueryTw] = useState<number | "">("");
+  const [queryTf, setQueryTf] = useState<number | "">("");
   
   // Bar parameters
   const [lengthMeters, setLengthMeters] = useState<number>(6);
@@ -39,7 +50,7 @@ export const LinearWeightCalculator: React.FC<LinearWeightCalculatorProps> = ({
   
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
-  // Filter profiles
+  // Filter profiles (name/text search mode)
   const filteredProfiles = STANDARD_CHILEAN_PROFILES.filter((p) => {
     const matchesCategory = selectedCategory === "all" || p.category === selectedCategory;
     const matchesSearch = 
@@ -47,6 +58,18 @@ export const LinearWeightCalculator: React.FC<LinearWeightCalculatorProps> = ({
       p.standard.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesCategory && matchesSearch;
   });
+
+  // Dimension-based detection (reverse lookup)
+  const dimensionMatches: ProfileMatch[] = searchMode === "medidas"
+    ? findMatchingProfiles({
+        h: queryH === "" ? undefined : queryH,
+        b: queryB === "" ? undefined : queryB,
+        tw: queryTw === "" ? undefined : queryTw,
+        tf: queryTf === "" ? undefined : queryTf
+      })
+    : [];
+
+  const hasDimensionQuery = queryH !== "" || queryB !== "" || queryTw !== "" || queryTf !== "";
 
   const selectedProfile = STANDARD_CHILEAN_PROFILES.find((p) => p.id === selectedProfileId) || STANDARD_CHILEAN_PROFILES[0];
 
@@ -170,6 +193,144 @@ export const LinearWeightCalculator: React.FC<LinearWeightCalculatorProps> = ({
           
           {/* Category Filter Badges */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 sm:p-4 space-y-2.5">
+
+            {/* Search Mode Switcher */}
+            <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800 w-full sm:w-fit">
+              <button
+                type="button"
+                onClick={() => setSearchMode("nombre")}
+                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  searchMode === "nombre"
+                    ? "bg-sky-500 text-slate-950 font-bold shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Search className="w-3.5 h-3.5" />
+                Buscar por Nombre
+              </button>
+              <button
+                type="button"
+                onClick={() => setSearchMode("medidas")}
+                className={`flex-1 sm:flex-none px-3 py-1.5 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  searchMode === "medidas"
+                    ? "bg-sky-500 text-slate-950 font-bold shadow-sm"
+                    : "text-slate-400 hover:text-white"
+                }`}
+              >
+                <Target className="w-3.5 h-3.5" />
+                Detectar por Medidas
+              </button>
+            </div>
+
+            {searchMode === "medidas" && (
+              <div className="pt-2 border-t border-slate-800/80 space-y-3">
+                <p className="text-[11px] text-slate-400 flex items-start gap-1.5">
+                  <Info className="w-3.5 h-3.5 text-sky-400 shrink-0 mt-0.5" />
+                  Mide la pieza en terreno e ingresa lo que tengas (no necesitas los 4 datos). El sistema busca el perfil de catálogo más parecido.
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Alto / Peralte (h)</label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="mm"
+                        value={queryH}
+                        onChange={(e) => setQueryH(e.target.value === "" ? "" : parseFloat(e.target.value))}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-white font-mono placeholder-slate-600 focus:outline-none focus:border-sky-500"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Ancho Ala (b)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="mm"
+                      value={queryB}
+                      onChange={(e) => setQueryB(e.target.value === "" ? "" : parseFloat(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-white font-mono placeholder-slate-600 focus:outline-none focus:border-sky-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Espesor Alma (tw)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      placeholder="mm"
+                      value={queryTw}
+                      onChange={(e) => setQueryTw(e.target.value === "" ? "" : parseFloat(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-white font-mono placeholder-slate-600 focus:outline-none focus:border-sky-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-400 block mb-1">Espesor Ala (tf)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      placeholder="mm"
+                      value={queryTf}
+                      onChange={(e) => setQueryTf(e.target.value === "" ? "" : parseFloat(e.target.value))}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-2 text-xs text-white font-mono placeholder-slate-600 focus:outline-none focus:border-sky-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Dimension Match Results */}
+                {hasDimensionQuery && (
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                    {dimensionMatches.length === 0 ? (
+                      <div className="text-center py-4 text-xs text-slate-500">
+                        No se encontró ningún perfil del catálogo parecido a esas medidas.
+                      </div>
+                    ) : (
+                      dimensionMatches.map((m) => {
+                        const isSelected = selectedProfileId === m.profile.id;
+                        const isGoodMatch = m.deviationPercent <= 5;
+                        return (
+                          <button
+                            key={m.profile.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedProfileId(m.profile.id);
+                              setLengthMeters(m.profile.standardLengthM || 6);
+                            }}
+                            className={`w-full flex items-center justify-between gap-2 p-2.5 rounded-lg border text-left transition-all cursor-pointer ${
+                              isSelected
+                                ? "bg-sky-500/10 border-sky-500 ring-1 ring-sky-500/40"
+                                : "bg-slate-950/70 border-slate-800 hover:border-slate-700"
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                {isGoodMatch && <Sparkles className="w-3 h-3 text-emerald-400 shrink-0" />}
+                                <span className="text-xs font-bold text-white truncate">{m.profile.designation}</span>
+                              </div>
+                              <span className="text-[10px] text-slate-500 truncate block">{m.profile.standard}</span>
+                            </div>
+                            <span
+                              className={`shrink-0 text-[10px] font-mono font-bold px-2 py-0.5 rounded-full ${
+                                isGoodMatch
+                                  ? "bg-emerald-500/15 text-emerald-400 border border-emerald-500/30"
+                                  : "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+                              }`}
+                            >
+                              {isGoodMatch ? "Coincide" : `±${m.deviationPercent}%`}
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {searchMode === "nombre" && (
+              <>
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1.5">
                 <Layers className="w-3.5 h-3.5" />
@@ -208,8 +369,12 @@ export const LinearWeightCalculator: React.FC<LinearWeightCalculatorProps> = ({
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 transition-colors"
               />
             </div>
+            </>
+            )}
           </div>
 
+          {searchMode === "nombre" && (
+          <>
           {/* Profile List Grid */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 sm:p-4">
             <div className="flex items-center justify-between text-xs font-semibold text-slate-300 mb-2.5 uppercase tracking-wider">
@@ -285,6 +450,8 @@ export const LinearWeightCalculator: React.FC<LinearWeightCalculatorProps> = ({
               )}
             </div>
           </div>
+          </>
+          )}
 
           {/* Length & Quantity Controls */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 sm:p-4">
