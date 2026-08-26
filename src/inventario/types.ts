@@ -105,6 +105,12 @@ export interface OptimizationSettings {
   // empalme (ej. 90mm) — distinta del kerf normal, que sigue aplicando sin
   // cambios al resto de los cortes.
   spliceFacingLossMm?: number;
+  // Busca el llenado ÓPTIMO de cada barra (knapsack exacto) en vez del
+  // heurístico rápido. Llenar cada barra al máximo es óptimo localmente
+  // pero a veces deja piezas sueltas que después no combinan, así que no
+  // siempre mejora el total del perfil — `multiNestingEngine` prueba las
+  // dos variantes y se queda con la que compre menos material.
+  useExactFill?: boolean;
 }
 
 export interface OversizedPieceOption {

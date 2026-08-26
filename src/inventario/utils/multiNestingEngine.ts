@@ -173,50 +173,62 @@ export function runProjectPreNesting(
     // completo (empaque normal + cualquier empalme, todo a ese mismo
     // largo) y se elige el que resuelva más piezas y, entre esos, el que
     // use menos material bruto total.
+    // Se evalúan TODAS las combinaciones de:
+    //   · cada largo comercial candidato (como escenario de largo único),
+    //   · cortar barra por barra vs. "tira empalmada" (dos barras del mismo
+    //     largo soldadas ANTES de cortar, ej. 12m+12m=24m — cuando dos
+    //     piezas medianas no caben en una barra pero tres sí caben en dos
+    //     soldadas, esto reduce muchísimo el desperdicio),
+    //   · llenado heurístico rápido vs. llenado óptimo por barra (knapsack).
+    // …y gana la que compre menos material sin dejar más piezas pendientes.
+    // Ninguna de las dos últimas domina siempre: el llenado óptimo por
+    // barra a veces deja piezas huérfanas que empeoran el total del perfil,
+    // así que se comparan de verdad en vez de asumir cuál es mejor.
     const theoreticalSettings = { ...settings, prioritizeOffcuts: false };
-    let pureTheoreticalNestingResult = run1DNestingOptimization(
-      pureTheoreticalMaterial,
-      pieceRequests,
-      theoreticalSettings,
-      [candidateLengths[0]]
-    );
+    let pureTheoreticalNestingResult: OptimizationResult | null = null;
     let pureTheoreticalLen = candidateLengths[0];
-    for (let i = 1; i < candidateLengths.length; i++) {
-      const len = candidateLengths[i];
-      const fixedResult = run1DNestingOptimization(pureTheoreticalMaterial, pieceRequests, theoreticalSettings, [len]);
-      // A igual material (empate exacto, típico cuando un largo es
-      // múltiplo entero de otro, ej. 12m=2×6m), preferir el largo MAYOR:
-      // mismo material, menos barras físicas que comprar y manipular.
-      if (
-        fixedResult.missingPieces.length < pureTheoreticalNestingResult.missingPieces.length ||
-        (fixedResult.missingPieces.length === pureTheoreticalNestingResult.missingPieces.length &&
-          (fixedResult.totalRawMaterialLengthMm < pureTheoreticalNestingResult.totalRawMaterialLengthMm ||
-            (fixedResult.totalRawMaterialLengthMm === pureTheoreticalNestingResult.totalRawMaterialLengthMm && len > pureTheoreticalLen)))
-      ) {
-        pureTheoreticalNestingResult = fixedResult;
+
+    const considerTheoretical = (candidate: OptimizationResult | null, len: number) => {
+      if (!candidate) return;
+      if (!pureTheoreticalNestingResult) {
+        pureTheoreticalNestingResult = candidate;
+        pureTheoreticalLen = len;
+        return;
+      }
+      const best = pureTheoreticalNestingResult;
+      const better =
+        candidate.missingPieces.length < best.missingPieces.length ||
+        (candidate.missingPieces.length === best.missingPieces.length &&
+          (candidate.totalRawMaterialLengthMm < best.totalRawMaterialLengthMm ||
+            // A igual material (empate exacto, típico cuando un largo es
+            // múltiplo entero de otro, ej. 12m=2×6m), preferir el largo
+            // MAYOR: mismo material, menos barras que comprar y manipular.
+            (candidate.totalRawMaterialLengthMm === best.totalRawMaterialLengthMm && len > pureTheoreticalLen)));
+      if (better) {
+        pureTheoreticalNestingResult = candidate;
         pureTheoreticalLen = len;
       }
-    }
+    };
 
-    // Estrategia "tira empalmada": soldar DE ANTEMANO dos barras del mismo
-    // largo comercial y cortar la tira completa (ej. 12m+12m=24m). Cuando
-    // las piezas son "medianas" (dos no caben en una barra pero tres sí
-    // caben en dos barras soldadas), esto reduce muchísimo el desperdicio
-    // frente a cortar barra por barra. Se evalúa como una alternativa más
-    // y solo gana si compra MENOS material sin dejar más piezas pendientes.
-    if (settings.allowMultipleStandardLengths) {
+    for (const exact of [false, true]) {
+      const variantSettings = { ...theoreticalSettings, useExactFill: exact };
       for (const len of candidateLengths) {
-        const stripResult = runSplicedStripNesting(pureTheoreticalMaterial, pieceRequests, theoreticalSettings, len);
-        if (!stripResult) continue;
-        if (
-          stripResult.missingPieces.length < pureTheoreticalNestingResult.missingPieces.length ||
-          (stripResult.missingPieces.length === pureTheoreticalNestingResult.missingPieces.length &&
-            stripResult.totalRawMaterialLengthMm < pureTheoreticalNestingResult.totalRawMaterialLengthMm)
-        ) {
-          pureTheoreticalNestingResult = stripResult;
-          pureTheoreticalLen = len;
+        considerTheoretical(
+          run1DNestingOptimization(pureTheoreticalMaterial, pieceRequests, variantSettings, [len]),
+          len
+        );
+        if (settings.allowMultipleStandardLengths) {
+          considerTheoretical(runSplicedStripNesting(pureTheoreticalMaterial, pieceRequests, variantSettings, len), len);
         }
       }
+    }
+    if (!pureTheoreticalNestingResult) {
+      pureTheoreticalNestingResult = run1DNestingOptimization(
+        pureTheoreticalMaterial,
+        pieceRequests,
+        theoreticalSettings,
+        [candidateLengths[0]]
+      );
     }
     // El largo "predominante" real (para mostrar en pantalla/Excel) es el
     // más usado entre las barras nuevas del resultado ganador — nunca
@@ -264,40 +276,44 @@ export function runProjectPreNesting(
     const newBoughtLengthMm = (r: OptimizationResult) =>
       r.barPlans.filter((p) => p.sourceType === 'new_purchased_bar').reduce((s, p) => s + p.sourceLengthMm, 0);
 
-    let nestingRes = run1DNestingOptimization(effectiveMaterial, pieceRequests, settings, [candidateLengths[0]]);
+    let nestingRes: OptimizationResult | null = null;
     let nestingResLen = candidateLengths[0];
-    for (let i = 1; i < candidateLengths.length; i++) {
-      const len = candidateLengths[i];
-      const fixedRes = run1DNestingOptimization(effectiveMaterial, pieceRequests, settings, [len]);
-      if (
-        fixedRes.missingPieces.length < nestingRes.missingPieces.length ||
-        (fixedRes.missingPieces.length === nestingRes.missingPieces.length &&
-          (newBoughtLengthMm(fixedRes) < newBoughtLengthMm(nestingRes) ||
-            (newBoughtLengthMm(fixedRes) === newBoughtLengthMm(nestingRes) && len > nestingResLen)))
-      ) {
-        nestingRes = fixedRes;
+
+    const considerStock = (candidate: OptimizationResult | null, len: number) => {
+      if (!candidate) return;
+      if (!nestingRes) {
+        nestingRes = candidate;
+        nestingResLen = len;
+        return;
+      }
+      const best = nestingRes;
+      const better =
+        candidate.missingPieces.length < best.missingPieces.length ||
+        (candidate.missingPieces.length === best.missingPieces.length &&
+          (newBoughtLengthMm(candidate) < newBoughtLengthMm(best) ||
+            (newBoughtLengthMm(candidate) === newBoughtLengthMm(best) && len > nestingResLen)));
+      if (better) {
+        nestingRes = candidate;
         nestingResLen = len;
       }
-    }
+    };
 
-    // Misma alternativa de "tira empalmada" que en el cálculo teórico. Ojo:
-    // la tira se arma solo con barras NUEVAS (el stock de bodega está a
-    // largo simple), así que esta variante renuncia a consumir bodega — por
-    // eso se compara contra cuánto material NUEVO compra cada alternativa,
-    // que es justo lo que cambia entre ellas.
-    if (settings.allowMultipleStandardLengths) {
+    // Mismas variantes que en el teórico. Ojo con la tira empalmada: se
+    // arma solo con barras NUEVAS (el stock de bodega está a largo simple),
+    // así que renuncia a consumir bodega — por eso la comparación es sobre
+    // cuánto material NUEVO compra cada alternativa, que es justo lo que
+    // cambia entre ellas.
+    for (const exact of [false, true]) {
+      const variantSettings = { ...settings, useExactFill: exact };
       for (const len of candidateLengths) {
-        const stripRes = runSplicedStripNesting(effectiveMaterial, pieceRequests, settings, len);
-        if (!stripRes) continue;
-        if (
-          stripRes.missingPieces.length < nestingRes.missingPieces.length ||
-          (stripRes.missingPieces.length === nestingRes.missingPieces.length &&
-            newBoughtLengthMm(stripRes) < newBoughtLengthMm(nestingRes))
-        ) {
-          nestingRes = stripRes;
-          nestingResLen = len;
+        considerStock(run1DNestingOptimization(effectiveMaterial, pieceRequests, variantSettings, [len]), len);
+        if (settings.allowMultipleStandardLengths) {
+          considerStock(runSplicedStripNesting(effectiveMaterial, pieceRequests, variantSettings, len), len);
         }
       }
+    }
+    if (!nestingRes) {
+      nestingRes = run1DNestingOptimization(effectiveMaterial, pieceRequests, settings, [candidateLengths[0]]);
     }
 
     // Stock check

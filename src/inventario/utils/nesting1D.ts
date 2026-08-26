@@ -46,7 +46,8 @@ export function run1DNestingOptimization(
     kerfMm = 3,
     trimCutMm = 10,
     minUsableOffcutMm = 1000,
-    prioritizeOffcuts = true
+    prioritizeOffcuts = true,
+    useExactFill = false
   } = settings;
 
   // 1. Flatten requested pieces
@@ -342,7 +343,7 @@ export function run1DNestingOptimization(
     for (const offcut of offcutSources) {
       if (unassignedPieces.length === 0) break;
 
-      const plan = tryPackBar(offcut, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter);
+      const plan = tryPackBar(offcut, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter, useExactFill);
       if (plan && plan.cuts.length > 0) {
         offcut.used = true;
         barPlans.push(plan);
@@ -366,7 +367,7 @@ export function run1DNestingOptimization(
   for (const stdBar of standardSources) {
     if (unassignedPieces.length === 0) break;
 
-    const plan = tryPackBar(stdBar, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter);
+    const plan = tryPackBar(stdBar, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter, useExactFill);
     if (plan && plan.cuts.length > 0) {
       stdBar.used = true;
       barPlans.push(plan);
@@ -410,7 +411,7 @@ export function run1DNestingOptimization(
         location: 'Por Comprar / Solicitar',
         used: true
       };
-      const trialPlan = tryPackBar(trialBar, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter);
+      const trialPlan = tryPackBar(trialBar, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter, useExactFill);
       // A igual eficiencia (empate exacto, típico cuando un largo es
       // múltiplo entero de otro — ej. 2 piezas de 4290mm en una barra de
       // 12m da la MISMA eficiencia que 1 pieza de 4290mm en una de 6m,
@@ -557,7 +558,7 @@ export function run1DNestingOptimization(
             location: 'Por Comprar / Solicitar',
             used: true
           };
-          const trialPlan = tryPackBar(trialBar, fillerSim, kerfMm, trimCutMm, minUsableOffcutMm, simCounter);
+          const trialPlan = tryPackBar(trialBar, fillerSim, kerfMm, trimCutMm, minUsableOffcutMm, simCounter, useExactFill);
           // Mismo desempate que en la Fase C: a igual eficiencia, preferir
           // la barra más grande (menos barras físicas por el mismo material).
           if (
@@ -753,7 +754,8 @@ function tryPackBar(
   kerfMm: number,
   trimCutMm: number,
   minUsableOffcutMm: number,
-  barIndex: number
+  barIndex: number,
+  useExactFill: boolean
 ): CutBarPlan | null {
   const barLength = source.lengthMm;
   const usableCapacity = barLength - trimCutMm;
@@ -827,7 +829,113 @@ function tryPackBar(
     if (candidate.used > bestFill.used) bestFill = candidate;
   }
 
+  // Búsqueda EXACTA del mejor llenado posible de esta barra (knapsack
+  // acotado). El heurístico de arriba ancla una pieza y rellena de mayor a
+  // menor, así que nunca encuentra combinaciones "raras" que llenan casi
+  // perfecto — ej. 4201+6154+6815+6815 = 23.985 de 24.000.
+  //
+  // No siempre conviene, y por eso es opcional: llenar CADA barra al máximo
+  // es óptimo localmente pero puede dejar piezas "huérfanas" que después no
+  // combinan con nada, empeorando el total del perfil. Quién gana depende
+  // del mix de largos, así que `multiNestingEngine` corre el perfil con y
+  // sin esta opción y se queda con el que compre menos material.
+  if (useExactFill) {
+    const exact = bestFillExact(availablePieces, usableCapacity, kerfMm);
+    if (exact && exact.used > bestFill.used) bestFill = exact;
+  }
+
   return buildBarPlan(source, bestFill.selected, kerfMm, trimCutMm, minUsableOffcutMm, barIndex);
+}
+
+/** Tope de trabajo del knapsack exacto por barra: largos distintos ×
+ * capacidad. Por encima de esto se usa solo el heurístico, para que un
+ * perfil con cientos de largos distintos no congele el cálculo. */
+const EXACT_FILL_BUDGET = 6_000_000;
+
+/**
+ * Mejor llenado POSIBLE de una barra (knapsack acotado exacto), o null si
+ * el problema es demasiado grande para resolverlo exacto en tiempo real.
+ *
+ * Truco de la sierra: el corte consume `kerfMm` entre piezas, así que una
+ * barra con n piezas ocupa Σlargos + (n−1)·kerf. Sumarle el kerf a cada
+ * pieza y también a la capacidad convierte eso en un knapsack clásico
+ * (Σ(largo+kerf) ≤ capacidad+kerf), y maximizar esa suma es exactamente
+ * minimizar el sobrante físico de la barra.
+ */
+function bestFillExact(
+  availablePieces: FlatPiece[],
+  usableCapacity: number,
+  kerfMm: number
+): { selected: FlatPiece[]; used: number } | null {
+  const byLength = new Map<number, FlatPiece[]>();
+  for (const p of availablePieces) {
+    if (p.lengthMm > usableCapacity) continue;
+    const arr = byLength.get(p.lengthMm);
+    if (arr) arr.push(p);
+    else byLength.set(p.lengthMm, [p]);
+  }
+
+  const lengths = Array.from(byLength.keys());
+  if (lengths.length === 0) return null;
+
+  const cap = usableCapacity + kerfMm;
+  if (lengths.length * cap > EXACT_FILL_BUDGET) return null;
+
+  // `layers[i]` = sumas alcanzables usando solo los primeros i largos.
+  const layers: Uint8Array[] = [];
+  let prev = new Uint8Array(cap + 1);
+  prev[0] = 1;
+  layers.push(prev);
+
+  for (let i = 0; i < lengths.length; i++) {
+    const w = lengths[i] + kerfMm;
+    const maxCopies = byLength.get(lengths[i])!.length;
+    const cur = new Uint8Array(cap + 1);
+    // `copies[c]` = cuántas unidades de ESTE largo se usaron para llegar a
+    // `c` — así se respeta el stock disponible de ese largo (knapsack
+    // acotado, no ilimitado).
+    const copies = new Int32Array(cap + 1).fill(-1);
+    for (let c = 0; c <= cap; c++) {
+      if (prev[c]) {
+        cur[c] = 1;
+        copies[c] = 0;
+      } else if (c >= w && cur[c - w] === 1 && copies[c - w] >= 0 && copies[c - w] < maxCopies) {
+        cur[c] = 1;
+        copies[c] = copies[c - w] + 1;
+      }
+    }
+    layers.push(cur);
+    prev = cur;
+  }
+
+  let best = -1;
+  for (let c = cap; c >= 1; c--) {
+    if (prev[c]) {
+      best = c;
+      break;
+    }
+  }
+  if (best <= 0) return null;
+
+  const selected: FlatPiece[] = [];
+  let c = best;
+  for (let i = lengths.length - 1; i >= 0; i--) {
+    const w = lengths[i] + kerfMm;
+    const pool = byLength.get(lengths[i])!;
+    let used = 0;
+    while (layers[i][c] !== 1 && c >= w) {
+      c -= w;
+      used++;
+      if (used > pool.length) return null; // inconsistencia: no forzar un plan inválido
+    }
+    for (let u = 0; u < used; u++) selected.push(pool[u]);
+  }
+  if (c !== 0 || selected.length === 0) return null;
+
+  // Devolver `used` en la misma métrica que el heurístico: Σlargos +
+  // (n−1)·kerf, es decir la suma "doblada" menos el kerf que se le agregó
+  // de más a la capacidad.
+  return { selected, used: best - kerfMm };
 }
 
 /**
