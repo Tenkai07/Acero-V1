@@ -1,16 +1,17 @@
 import React from "react";
-import { 
-  Square, 
+import {
+  Square,
   Box,
-  Layers, 
-  FoldHorizontal, 
-  BookOpen, 
-  ArrowRightLeft, 
-  ShoppingBag, 
+  Layers,
+  FoldHorizontal,
+  BookOpen,
+  ArrowRightLeft,
+  ShoppingBag,
   FolderKanban,
   FileBox,
   Warehouse,
-  BarChart3
+  BarChart3,
+  LayoutDashboard
 } from "lucide-react";
 import { NavigationTab } from "../types";
 
@@ -45,6 +46,13 @@ export const Navigation: React.FC<NavigationProps> = ({
     icon: React.ElementType;
     badge?: number;
   }[] = [
+    {
+      id: "dashboard",
+      label: "Dashboard",
+      shortLabel: "Dashboard",
+      subLabel: "Resumen Bodega, Cubicación & Rentabilidad",
+      icon: LayoutDashboard
+    },
     {
       id: "pieces",
       label: "Piezas a Medida",

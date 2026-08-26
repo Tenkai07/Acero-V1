@@ -1,5 +1,6 @@
-export type NavigationTab = 
-  | "plates" 
+export type NavigationTab =
+  | "dashboard"
+  | "plates"
   | "pieces"
   | "profiles" 
   | "folding" 

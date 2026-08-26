@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Header } from "./components/Header";
 import { Navigation } from "./components/Navigation";
+import { DashboardView } from "./components/DashboardView";
 import { CustomPiecesCalculator } from "./components/calculators/CustomPiecesCalculator";
 import { PlateCalculator } from "./components/calculators/PlateCalculator";
 import { LinearWeightCalculator } from "./components/calculators/LinearWeightCalculator";
@@ -34,7 +35,7 @@ import { CalculationHistoryItem, NavigationTab, SteelProject, SteelProjectItem }
 
 export function AuthenticatedApp() {
   const { user, isAdmin, logout } = useAuth();
-  const [activeTab, setActiveTab] = useState<NavigationTab>("plates");
+  const [activeTab, setActiveTab] = useState<NavigationTab>("dashboard");
   const [isDarkMode, setIsDarkMode] = useState<boolean>(true);
   const [visualTheme, setVisualTheme] = useState<VisualThemePreset>("titanium-dark");
   const [uiDensity, setUiDensity] = useState<UIDensity>("compact");
@@ -332,6 +333,8 @@ export function AuthenticatedApp() {
 
       {/* Main App Content View Container */}
       <main className={`flex-1 max-w-7xl w-full mx-auto relative z-10 ${uiDensity === "compact" ? "p-2.5 sm:p-4 lg:p-6" : "p-4 sm:p-6 lg:p-8"} pb-24 md:pb-8`}>
+        {activeTab === "dashboard" && <DashboardView />}
+
         {activeTab === "pieces" && (
           <CustomPiecesCalculator
             onAddToProject={handleAddItemToProject}
