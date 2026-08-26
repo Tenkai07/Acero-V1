@@ -1,6 +1,26 @@
 import { MaterialCategory } from '../types';
 
 /**
+ * Un tubo CUADRADO se escribe de dos formas equivalentes en las planillas:
+ * "RHS150X6" y "RHS150X150X6" son exactamente el mismo perfil (150×150,
+ * espesor 6). Si quedan como dos perfiles distintos, el anidado nunca
+ * combina sus piezas entre sí y se compra material de más — en el proyecto
+ * real P420 esa separación costaba ~144m de acero.
+ *
+ * Devuelve la forma corta canónica para poder agruparlos. Solo colapsa
+ * cuando las dos primeras medidas son IGUALES: "RHS200X100X4" es un tubo
+ * rectangular de verdad y se deja tal cual.
+ */
+export function canonicalProfileCode(profileCode: string): string {
+  const code = (profileCode || '').trim().toUpperCase();
+  const squareTube = /^(RHS|SHS)(\d+)X(\d+)X(\d+)$/.exec(code);
+  if (squareTube && squareTube[2] === squareTube[3]) {
+    return `${squareTube[1]}${squareTube[2]}X${squareTube[4]}`;
+  }
+  return code;
+}
+
+/**
  * Infiere qué largos comerciales adicionales (además de 6000mm, que siempre
  * está disponible) es razonable ofrecer para un perfil, según reglas de
  * negocio confirmadas por el usuario:

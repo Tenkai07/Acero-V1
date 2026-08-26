@@ -9,7 +9,7 @@ import { run1DNestingOptimization } from './nesting1D';
 import { runSplicedStripNesting } from './splicedBarStrategy';
 import { COLOR_PALETTE } from '../data/initialStock';
 import { getReservedBarsCount, getReservedOffcuts } from './stockReservations';
-import { inferAlternateBarLengths } from './commercialLengths';
+import { inferAlternateBarLengths, canonicalProfileCode } from './commercialLengths';
 
 /**
  * Cuántas semillas de multi-arranque se prueban por perfil además de la
@@ -79,16 +79,59 @@ export interface ConsolidatedPurchaseReport {
 }
 
 /**
+ * Junta en un solo grupo los perfiles que son EL MISMO material escrito de
+ * distinta forma (ver `canonicalProfileCode`: "RHS150X6" = "RHS150X150X6").
+ * Se conserva el id y el material vinculado del primer grupo, y se muestra
+ * el código canónico corto.
+ */
+function mergeEquivalentProfileGroups(groups: BOMProfileGroup[]): BOMProfileGroup[] {
+  const byCanonical = new Map<string, BOMProfileGroup[]>();
+  groups.forEach((g) => {
+    const key = canonicalProfileCode(g.cleanProfileCode);
+    const list = byCanonical.get(key);
+    if (list) list.push(g);
+    else byCanonical.set(key, [g]);
+  });
+
+  const result: BOMProfileGroup[] = [];
+  byCanonical.forEach((list, canonicalCode) => {
+    if (list.length === 1) {
+      result.push(list[0]);
+      return;
+    }
+    result.push({
+      ...list[0],
+      cleanProfileCode: canonicalCode,
+      pieces: list.flatMap((g) => g.pieces),
+      totalPiecesCount: list.reduce((s, g) => s + g.totalPiecesCount, 0),
+      totalLengthMm: list.reduce((s, g) => s + g.totalLengthMm, 0),
+      totalWeightKg: list.reduce((s, g) => s + g.totalWeightKg, 0),
+      // Si alguno de los grupos sí quedó vinculado a un material de bodega,
+      // ese vínculo vale para el grupo fusionado.
+      matchedMaterialId: list.find((g) => g.matchedMaterialId)?.matchedMaterialId
+    });
+  });
+  return result;
+}
+
+/**
  * Runs 1D Pre-Nesting and Warehouse Stock Analysis for an entire multi-profile BOM project
  */
 export function runProjectPreNesting(
-  groups: BOMProfileGroup[],
+  groupsRaw: BOMProfileGroup[],
   inventory: MaterialStockItem[],
   settings: OptimizationSettings
 ): {
   updatedGroups: BOMProfileGroup[];
   consolidatedReport: ConsolidatedPurchaseReport;
 } {
+  // Un mismo perfil puede venir escrito de dos formas en la planilla
+  // ("RHS150X6" y "RHS150X150X6" son el mismo tubo cuadrado). Si se dejan
+  // separados, sus piezas nunca se combinan entre sí y se compra material
+  // de más — en el proyecto real P420 costaba ~144m de acero. Se agrupan
+  // ANTES de anidar para que compitan por las mismas barras.
+  const groups = mergeEquivalentProfileGroups(groupsRaw);
+
   const updatedGroups: BOMProfileGroup[] = [];
 
   let totalPiecesCount = 0;
