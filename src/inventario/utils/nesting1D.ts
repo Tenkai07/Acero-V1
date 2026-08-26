@@ -411,6 +411,191 @@ export function run1DNestingOptimization(
     }
   }
 
+  // 5.5 Optimización de "barras solitarias": una barra nueva comprada con
+  // UNA sola pieza puede estar desperdiciando mucho material si la pieza
+  // cabe en un largo real grande pero es bastante más corta que él (ej. una
+  // pieza de 6.504mm sola en una barra de 12m bota 5.496mm) — Fase C no
+  // pudo usar el largo más chico ahí porque la pieza literalmente no cabe
+  // en él (6.504mm > 6.000mm), así que se queda con el único largo que sí
+  // la recibe entera, aunque desperdicie mucho.
+  //
+  // Ojo con la trampa: evaluar cada pieza AISLADA contra "empalmar con una
+  // barra nueva dedicada solo a su tramo corto" casi nunca gana (6000 de
+  // barra principal + 6000 de barra nueva solo para cortar 500mm da 12000,
+  // igual o peor que la barra grande sola). La ganancia real aparece porque
+  // MUCHAS piezas distintas pueden compartir una única barra nueva para sus
+  // tramos cortos (varios tramos de ~500-3000mm caben juntos en una sola
+  // barra de 6m). Por eso acá se junta el LOTE completo de candidatas,
+  // se simula empacar todos los tramos cortos juntos, y solo se aplica el
+  // cambio si el total de material (tramos principales + barras nuevas
+  // realmente necesarias para los tramos cortos, tras compartir) es MENOR
+  // que el total original — nunca pieza por pieza. El usuario confirmó
+  // priorizar el ahorro de material real por sobre evitar empalmes
+  // "innecesarios".
+  const realCandidateLengths = Array.from(
+    new Set([material.standardBarLengthMm, ...(material.alternateBarLengthsMm || [])])
+  );
+
+  if (realCandidateLengths.length > 1) {
+    const smallestRealLength = Math.min(...realCandidateLengths);
+    const effectiveSpliceLossMm = getSpliceFacingLossMm(material.code, material.category, settings.spliceFacingLossMm ?? 5);
+
+    type SplitCandidate = {
+      planIdx: number;
+      cut: CutPieceDetail;
+      mainLengthMm: number;
+      fillerNeededMm: number;
+      offcut?: { id: string; lengthMm: number };
+    };
+    const candidates: SplitCandidate[] = [];
+
+    barPlans.forEach((plan, planIdx) => {
+      if (plan.cuts.length !== 1) return;
+      if (plan.sourceType !== 'new_purchased_bar') return;
+      if (plan.sourceLengthMm <= smallestRealLength) return;
+
+      const cut = plan.cuts[0];
+      const offcutSnapshot = getAvailableOffcuts(material).filter((o) => !consumedOffcutIdsForSplice.has(o.id));
+      const comparison = evaluateOversizedPieceOptions(cut.lengthMm, 1, material, settings, offcutSnapshot);
+      const spliceOption = comparison?.options.find((o) => o.type === 'splice');
+      if (!spliceOption) return;
+
+      candidates.push({
+        planIdx,
+        cut,
+        mainLengthMm: spliceOption.barLengthUsedMm,
+        fillerNeededMm: spliceOption.extraSegmentLengthMm || 0,
+        offcut:
+          spliceOption.extraSegmentSource === 'offcut' && spliceOption.extraSegmentOffcutId
+            ? { id: spliceOption.extraSegmentOffcutId, lengthMm: material.offcuts.find((o) => o.id === spliceOption.extraSegmentOffcutId)?.lengthMm || 0 }
+            : undefined
+      });
+    });
+
+    if (candidates.length > 0) {
+      const originalTotalMm = candidates.reduce((s, c) => s + barPlans[c.planIdx].sourceLengthMm, 0);
+      // Costo de material nuevo si se convierte: el tramo principal de
+      // TODAS las candidatas (uses o no retazo para el tramo corto) más las
+      // barras nuevas realmente necesarias para los tramos cortos que no
+      // encontraron retazo (fillerBarsTotalMm, calculado abajo). Los tramos
+      // cortos cubiertos por un retazo de bodega no suman material nuevo.
+      const mainTotalMm = candidates.reduce((s, c) => s + c.mainLengthMm, 0);
+
+      // Simular el empaque conjunto de los tramos cortos que SÍ necesitan
+      // barra nueva (los que ya tienen un retazo de bodega no consumen
+      // material nuevo, se excluyen de la simulación y siempre convienen).
+      const needsNewBar = candidates.filter((c) => !c.offcut);
+      const fillerSim: FlatPiece[] = needsNewBar
+        .map((c, idx) => ({
+          originalId: `${c.cut.pieceId}-ahorro`,
+          label: `${c.cut.label} (tramo adicional empalme por ahorro, incl. ${effectiveSpliceLossMm}mm de saneo)`,
+          lengthMm: c.fillerNeededMm,
+          color: c.cut.color,
+          instanceIndex: idx + 1,
+          isSpliceFiller: true
+        }))
+        .sort((a, b) => b.lengthMm - a.lengthMm);
+
+      const fillerBarPlans: CutBarPlan[] = [];
+      let simCounter = 1;
+      while (fillerSim.length > 0) {
+        let bestPlan: CutBarPlan | null = null;
+        for (const len of lengthsToTry) {
+          const trialBar: StockSourceOption = {
+            id: `sim-bar-${simCounter}`,
+            type: 'new_purchased_bar',
+            lengthMm: len,
+            location: 'Por Comprar / Solicitar',
+            used: true
+          };
+          const trialPlan = tryPackBar(trialBar, fillerSim, kerfMm, trimCutMm, minUsableOffcutMm, simCounter);
+          if (trialPlan && trialPlan.cuts.length > 0 && (!bestPlan || trialPlan.efficiencyPercentage > bestPlan.efficiencyPercentage)) {
+            bestPlan = trialPlan;
+          }
+        }
+        if (!bestPlan) break;
+        fillerBarPlans.push(bestPlan);
+        simCounter++;
+        const packedIds = new Set(bestPlan.cuts.map((c) => c.pieceId));
+        let i = fillerSim.length;
+        while (i--) {
+          const pieceKey = `${fillerSim[i].originalId}_${fillerSim[i].instanceIndex}`;
+          if (packedIds.has(pieceKey)) fillerSim.splice(i, 1);
+        }
+      }
+
+      const fillerBarsTotalMm = fillerBarPlans.reduce((s, p) => s + p.sourceLengthMm, 0);
+      const proposedTotalMm = mainTotalMm + fillerBarsTotalMm;
+
+      if (proposedTotalMm < originalTotalMm) {
+        // Conviene: se reemplazan las barras solitarias originales por sus
+        // tramos principales + los tramos cortos (de retazo o de las
+        // barras de relleno recién simuladas, que se materializan tal cual).
+        const idxToRemove = candidates.map((c) => c.planIdx).sort((a, b) => b - a);
+        idxToRemove.forEach((idx) => barPlans.splice(idx, 1));
+
+        candidates.forEach((c) => {
+          barPlans.push({
+            id: `bar-plan-splitopt-${barPlans.length + 1}`,
+            barIndex: 0,
+            sourceType: 'new_purchased_bar',
+            sourceLengthMm: c.mainLengthMm,
+            sourceLocation: 'Empalme por ahorro de material — tramo principal (barra estándar nueva)',
+            cuts: [
+              {
+                pieceId: c.cut.pieceId,
+                label: `${c.cut.label} (tramo principal)`,
+                lengthMm: c.mainLengthMm,
+                color: c.cut.color,
+                cutIndex: 1,
+                stopPositionMm: c.mainLengthMm
+              }
+            ],
+            totalCutLengthMm: c.mainLengthMm,
+            kerfTotalMm: 0,
+            trimCutMm: 0,
+            remainingMm: 0,
+            isReusableOffcut: false,
+            efficiencyPercentage: 100
+          });
+
+          if (c.offcut) {
+            consumedOffcutIdsForSplice.add(c.offcut.id);
+            const extraRemainingMm = Math.max(0, c.offcut.lengthMm - c.fillerNeededMm);
+            barPlans.push({
+              id: `bar-plan-splitopt-${barPlans.length + 1}`,
+              barIndex: 0,
+              sourceType: 'stock_offcut',
+              sourceLengthMm: c.offcut.lengthMm,
+              sourceOffcutId: c.offcut.id,
+              sourceLocation: 'Empalme por ahorro de material — tramo adicional (retazo de bodega)',
+              cuts: [
+                {
+                  pieceId: c.cut.pieceId,
+                  label: `${c.cut.label} (tramo adicional empalme por ahorro, incl. ${effectiveSpliceLossMm}mm de saneo)`,
+                  lengthMm: c.fillerNeededMm,
+                  color: c.cut.color,
+                  cutIndex: 1,
+                  stopPositionMm: c.fillerNeededMm
+                }
+              ],
+              totalCutLengthMm: c.fillerNeededMm,
+              kerfTotalMm: 0,
+              trimCutMm: 0,
+              remainingMm: extraRemainingMm,
+              isReusableOffcut: extraRemainingMm >= minUsableOffcutMm,
+              efficiencyPercentage: Number(((c.fillerNeededMm / c.offcut.lengthMm) * 100).toFixed(2))
+            });
+          }
+        });
+
+        fillerBarPlans.forEach((p) => {
+          barPlans.push({ ...p, id: `bar-plan-splitopt-${barPlans.length + 1}`, barIndex: 0 });
+        });
+      }
+    }
+  }
+
   // 6. Aggregate results and statistics
   let totalRawMaterialLengthMm = 0;
   let totalUsefulCutsLengthMm = 0;

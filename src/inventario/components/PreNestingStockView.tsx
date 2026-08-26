@@ -8,6 +8,7 @@ import {
 import { CutDiagram1D } from './CutDiagram1D';
 import { generateSampleInventoryExcel } from '../utils/excelInventoryHandler';
 import { exportCubicacionSummaryToExcel } from '../utils/cubicacionSummaryExport';
+import { groupBarPlansByPattern } from '../utils/cutPatternGrouping';
 import {
   Cpu,
   CheckCircle2,
@@ -729,35 +730,43 @@ export const PreNestingStockView = ({
                 </div>
               )}
 
-              {/* Cutting Diagrams 1D Bar by Bar */}
-              {activeNestingResult && (
-                <div className="space-y-3 pt-2">
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
-                      Diagramas de Corte 1D ({activeNestingResult.barPlans.length} barras):
-                    </span>
-                    <div className="flex items-center gap-3 text-xs">
-                      <span className="text-slate-500 font-mono">
-                        Eficiencia: <strong className="text-emerald-700">{activeNestingResult.overallEfficiencyPercentage}%</strong>
+              {/* Cutting Diagrams 1D — agrupados por patrón de corte: barras
+                  con exactamente las mismas piezas se muestran UNA vez con
+                  su cantidad de repeticiones, en vez de una por una (con
+                  cientos de barras, muchas comparten patrón). */}
+              {activeNestingResult && (() => {
+                const patternGroups = groupBarPlansByPattern(activeNestingResult.barPlans);
+                return (
+                  <div className="space-y-3 pt-2">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                        Patrones de Corte ({patternGroups.length} patrones distintos, {activeNestingResult.barPlans.length} barras):
                       </span>
-                      <span className="text-slate-400">|</span>
-                      <span className="text-slate-500">
-                        Modo: <strong>{analysisMode === 'theoretical' ? '100% Nuevas' : 'Optimizado con Bodega'}</strong>
-                      </span>
+                      <div className="flex items-center gap-3 text-xs">
+                        <span className="text-slate-500 font-mono">
+                          Eficiencia: <strong className="text-emerald-700">{activeNestingResult.overallEfficiencyPercentage}%</strong>
+                        </span>
+                        <span className="text-slate-400">|</span>
+                        <span className="text-slate-500">
+                          Modo: <strong>{analysisMode === 'theoretical' ? '100% Nuevas' : 'Optimizado con Bodega'}</strong>
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      {patternGroups.map((group) => (
+                        <CutDiagram1D
+                          key={group.representative.id}
+                          barPlan={group.representative}
+                          materialName={activeGroup.cleanProfileCode}
+                          repeatCount={group.repeatCount}
+                          barIndices={group.barIndices}
+                        />
+                      ))}
                     </div>
                   </div>
-
-                  <div className="space-y-3">
-                    {activeNestingResult.barPlans.map((plan) => (
-                      <CutDiagram1D
-                        key={plan.id}
-                        barPlan={plan}
-                        materialName={activeGroup.cleanProfileCode}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
           </div>
         )}

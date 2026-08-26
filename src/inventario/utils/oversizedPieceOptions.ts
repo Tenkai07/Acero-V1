@@ -2,24 +2,27 @@ import { MaterialStockItem, OffcutItem, OptimizationSettings, OversizedPieceComp
 import { getSpliceFacingLossMm } from './commercialLengths';
 
 /**
- * Evalúa las alternativas para una pieza que NO cabe en NINGUNA barra
- * comercial real disponible: comprar la barra más grande que la cubra
- * entera, o empalmarla — probando TODOS los largos comerciales reales
- * (estándar + alternativos, ej. 6m y 12m) como posible "tramo principal"
- * del empalme, no solo el estándar. Así se puede evaluar tanto un empalme
- * 6m+6m como uno 6m+12m o 12m+12m, y quedarse con el que menos desperdicia.
+ * Evalúa las alternativas de material para una pieza: comprar la barra
+ * comercial real que la cubra entera, o empalmarla — probando TODOS los
+ * largos comerciales reales (estándar + alternativos, ej. 6m y 12m) como
+ * posible "tramo principal" del empalme. Se compara SIEMPRE por material
+ * total consumido, incluso cuando la pieza cabe entera en una barra real
+ * más grande: una pieza de 6.504mm cabe en una barra de 12m, pero deja
+ * 5.496mm de desperdicio — empalmar 6m + un tramo corto de ~500mm
+ * desperdicia mucho menos material total, aunque técnicamente "no haría
+ * falta" empalmar. El usuario confirmó explícitamente priorizar el ahorro
+ * de material por sobre evitar el trabajo de empalmar.
  *
  * Simplificación deliberada: el tramo principal del empalme se trata como
  * una barra íntegra sin trimCutMm propio (el usuario describió la pérdida
  * del empalme como solo el saneamiento en la unión, no un saneo adicional
  * al de la barra completa).
  *
- * Devuelve null si la pieza cabe en una barra real sin empalme (no es
- * "oversized"), o si es tan larga que ni la barra más grande disponible ni
- * un empalme de UN solo tramo adicional alcanzan (dos largos reales
- * combinados es el máximo que cubre una pieza con un solo empalme — cada
- * pieza fabricada admite máximo uno; más que eso necesita dividirse en 2+
- * empalmes, caso que cubre `spliceCalculator.ts` en "Ajustar Medidas &
+ * Devuelve null si la pieza es tan larga que ni la barra más grande
+ * disponible ni un empalme de UN solo tramo adicional alcanzan (dos largos
+ * reales combinados es el máximo que cubre una pieza con un solo empalme —
+ * cada pieza fabricada admite máximo uno; más que eso necesita dividirse en
+ * 2+ empalmes, caso que cubre `spliceCalculator.ts` en "Ajustar Medidas &
  * Empalmes", no esta función).
  */
 export function evaluateOversizedPieceOptions(
@@ -48,9 +51,6 @@ export function evaluateOversizedPieceOptions(
   const largestRealLength = realLengths[realLengths.length - 1];
   const smallestRealLength = realLengths[0];
 
-  const fitsSomeRealBar = realLengths.some((len) => pieceLengthMm + trimCutMm <= len);
-  if (fitsSomeRealBar) return null; // no es "oversized", entra directo al packing normal
-
   // Un empalme de un solo tramo adicional cubre como máximo "el largo real
   // más grande, dos veces" (ej. 12m + 12m). Piezas más largas que eso
   // necesitan 2+ empalmes en la misma pieza — no está permitido (cada
@@ -60,9 +60,9 @@ export function evaluateOversizedPieceOptions(
 
   const options: OversizedPieceOption[] = [];
 
-  // --- Opción A: comprar la barra comercial real más grande que la cubra entera ---
-  // (en la práctica esto nunca dispara si fitsSomeRealBar ya fue true arriba,
-  // pero se deja explícito por si en el futuro se separa esa condición)
+  // --- Opción A: comprar la barra comercial real MÁS CHICA que la cubra entera ---
+  // (puede ser la única opción viable, o competir contra un empalme más
+  // barato en material total — el llamador decide comparando ambas)
   const fittingReal = realLengths.filter((len) => pieceLengthMm + trimCutMm <= len).sort((a, b) => a - b)[0];
   if (fittingReal) {
     const wasteMm = fittingReal - trimCutMm - pieceLengthMm;

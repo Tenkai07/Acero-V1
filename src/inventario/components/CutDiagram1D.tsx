@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { CutBarPlan, CutPieceDetail } from '../types';
-import { Info, Tag, Check, Scissors, AlertCircle } from 'lucide-react';
+import { Info, Tag, Check, Scissors, AlertCircle, Repeat } from 'lucide-react';
+import { formatBarIndices } from '../utils/cutPatternGrouping';
 
 interface CutDiagram1DProps {
   key?: string;
@@ -8,13 +9,21 @@ interface CutDiagram1DProps {
   materialName?: string;
   onMarkCutDone?: (barId: string, cutIndex: number) => void;
   completedCuts?: Set<string>; // 'barId_cutIndex'
+  /** Cuántas barras físicas comparten EXACTAMENTE este mismo patrón de
+   * corte (ver `groupBarPlansByPattern`) — 1 si no se agrupó nada. */
+  repeatCount?: number;
+  /** Los `barIndex` de todas las barras que comparten el patrón, para
+   * mostrar "Barras #3, #7, #12..." en vez de solo la primera. */
+  barIndices?: number[];
 }
 
 export const CutDiagram1D = ({
   barPlan,
   materialName,
   onMarkCutDone,
-  completedCuts
+  completedCuts,
+  repeatCount = 1,
+  barIndices
 }: CutDiagram1DProps) => {
   const [hoveredPiece, setHoveredPiece] = useState<CutPieceDetail | null>(null);
 
@@ -34,8 +43,18 @@ export const CutDiagram1D = ({
             <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">
               {barPlan.barIndex}
             </span>
-            <span>Barra #{barPlan.barIndex}</span>
+            <span>
+              {repeatCount > 1
+                ? `Patrón de Corte (barras ${formatBarIndices(barIndices || [barPlan.barIndex])})`
+                : `Barra #${barPlan.barIndex}`}
+            </span>
           </span>
+
+          {repeatCount > 1 && (
+            <span className="px-2.5 py-0.5 rounded-md font-bold text-[11px] border bg-blue-50 text-blue-800 border-blue-200 flex items-center gap-1">
+              <Repeat className="w-3 h-3" /> ×{repeatCount} barras iguales
+            </span>
+          )}
 
           <span
             className={`px-2.5 py-0.5 rounded-md font-semibold text-[11px] border ${
@@ -85,10 +104,16 @@ export const CutDiagram1D = ({
             {barPlan.isReusableOffcut ? (
               <span className="text-emerald-700 font-bold">
                 Retazo útil: <strong>{barPlan.remainingMm} mm</strong>
+                {repeatCount > 1 && (
+                  <span className="text-slate-400 font-normal"> (×{repeatCount} = {barPlan.remainingMm * repeatCount} mm total)</span>
+                )}
               </span>
             ) : (
               <span className="text-slate-500">
                 Merma: <strong>{barPlan.remainingMm} mm</strong>
+                {repeatCount > 1 && (
+                  <span className="text-slate-400 font-normal"> (×{repeatCount} = {barPlan.remainingMm * repeatCount} mm total)</span>
+                )}
               </span>
             )}
           </div>

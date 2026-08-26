@@ -1,6 +1,7 @@
 import * as XLSX from 'xlsx';
 import { BOMProfileGroup, MaterialStockItem } from '../types';
 import { getAvailableBarsCount, getReservedBarsCount, getAvailableOffcuts, getReservedOffcuts } from './stockReservations';
+import { groupBarPlansByPattern } from './cutPatternGrouping';
 
 function mainGrade(group: BOMProfileGroup): string {
   return group.pieces[0]?.grade || 'A36';
@@ -15,6 +16,28 @@ function formatSheet(ws: XLSX.WorkSheet, colWidths: number[], rowCount: number) 
     const lastCol = XLSX.utils.encode_col(colWidths.length - 1);
     ws['!autofilter'] = { ref: `A1:${lastCol}${rowCount + 1}` };
   }
+}
+
+/**
+ * Clasifica una fila de corte como empalme "Necesario" (la pieza no cabe en
+ * NINGUNA barra real) o "Por Ahorro" (la pieza sí cabía en una barra real,
+ * pero empalmarla con una más chica consume menos material total), o
+ * "Directo" si no lleva empalme. El origen de la barra (`sourceLocation`)
+ * solo es confiable cuando la barra tiene un único corte — cuando varios
+ * tramos cortos de empalme comparten una misma barra nueva, esa barra
+ * vuelve a un origen genérico ("Por Comprar / Solicitar") y la marca queda
+ * solo en el texto de la pieza (`cutLabel`) — por eso se revisan ambos
+ * juntos.
+ */
+function clasificarEmpalme(sourceLocation: string | undefined, cutLabel: string): { tipo: string; rol: string } {
+  const combined = `${sourceLocation || ''} ${cutLabel}`;
+  if (combined.includes('tramo principal')) {
+    return { tipo: combined.includes('por ahorro') ? 'Empalme por Ahorro' : 'Empalme Necesario', rol: 'Tramo Principal' };
+  }
+  if (combined.includes('tramo adicional')) {
+    return { tipo: combined.includes('por ahorro') ? 'Empalme por Ahorro' : 'Empalme Necesario', rol: 'Tramo Adicional' };
+  }
+  return { tipo: 'Directo (sin empalme)', rol: '' };
 }
 
 /**
@@ -53,6 +76,22 @@ export function exportCubicacionSummaryToExcel(
     // cuadrando: Piezas Resueltas + Piezas Pendientes = Piezas totales.
     const piezasPendientes = result?.missingPieces.reduce((s, p) => s + p.quantity, 0) || 0;
     const metrosPendientes = (result?.missingPieces.reduce((s, p) => s + p.lengthMm * p.quantity, 0) || 0) / 1000;
+
+    // Contar empalmes por tipo (1 por pieza empalmada = 1 fila "Tramo
+    // Principal"), para ver de un vistazo cuántos son necesarios (la pieza
+    // no cabía en ninguna barra real) vs. por ahorro (cabía, pero convino
+    // igual) sin tener que abrir la hoja de detalle.
+    let empalmesNecesarios = 0;
+    let empalmesPorAhorro = 0;
+    result?.barPlans.forEach((plan) => {
+      plan.cuts.forEach((cut) => {
+        const { tipo, rol } = clasificarEmpalme(plan.sourceLocation, cut.label);
+        if (rol !== 'Tramo Principal') return;
+        if (tipo === 'Empalme Necesario') empalmesNecesarios++;
+        else if (tipo === 'Empalme por Ahorro') empalmesPorAhorro++;
+      });
+    });
+
     return {
       Perfil: g.cleanProfileCode,
       Calidad: mainGrade(g),
@@ -60,6 +99,8 @@ export function exportCubicacionSummaryToExcel(
       'Piezas Totales': g.totalPiecesCount,
       'Piezas Resueltas': g.totalPiecesCount - piezasPendientes,
       'Piezas Pendientes (Empalme Múltiple)': piezasPendientes,
+      'Empalmes Necesarios': empalmesNecesarios,
+      'Empalmes por Ahorro': empalmesPorAhorro,
       'Metros Lineales Netos (Totales)': Number((g.totalLengthMm / 1000).toFixed(2)),
       'Metros Pendientes (Empalme Múltiple)': Number(metrosPendientes.toFixed(2)),
       'Peso Total (kg)': Number(g.totalWeightKg.toFixed(2)),
@@ -81,6 +122,8 @@ export function exportCubicacionSummaryToExcel(
     'Piezas Totales': groups.reduce((s, g) => s + g.totalPiecesCount, 0),
     'Piezas Resueltas': requerimientoRows.reduce((s, r) => s + r['Piezas Resueltas'], 0),
     'Piezas Pendientes (Empalme Múltiple)': requerimientoRows.reduce((s, r) => s + r['Piezas Pendientes (Empalme Múltiple)'], 0),
+    'Empalmes Necesarios': requerimientoRows.reduce((s, r) => s + (r['Empalmes Necesarios'] as number), 0),
+    'Empalmes por Ahorro': requerimientoRows.reduce((s, r) => s + (r['Empalmes por Ahorro'] as number), 0),
     'Metros Lineales Netos (Totales)': Number(totalMetrosReq.toFixed(2)),
     'Metros Pendientes (Empalme Múltiple)': Number(totalMetrosPendientesReq.toFixed(2)),
     'Peso Total (kg)': Number(totalPesoReq.toFixed(2)),
@@ -92,7 +135,7 @@ export function exportCubicacionSummaryToExcel(
   });
 
   const wsRequerimiento = XLSX.utils.json_to_sheet(requerimientoRows);
-  formatSheet(wsRequerimiento, [16, 10, 14, 12, 13, 22, 18, 22, 13, 18, 20], requerimientoRows.length);
+  formatSheet(wsRequerimiento, [16, 10, 14, 12, 13, 22, 16, 16, 18, 22, 13, 18, 20], requerimientoRows.length);
   XLSX.utils.book_append_sheet(workbook, wsRequerimiento, 'Requerimiento Total');
 
   // -------------------------------------------------------------------
@@ -122,6 +165,51 @@ export function exportCubicacionSummaryToExcel(
   }
 
   // -------------------------------------------------------------------
+  // Hoja "Patrones de Corte": agrupa barras con EXACTAMENTE el mismo
+  // patrón (mismo largo de origen y las mismas piezas con las mismas
+  // cantidades) en una sola fila con su número de repeticiones — igual al
+  // formato "layouts" de las herramientas de corte especializadas. Es un
+  // resumen rápido; el detalle pieza por pieza sigue disponible en
+  // "Detalle Barra por Barra" para cotejar a mano.
+  // -------------------------------------------------------------------
+  const patronesRows: Record<string, string | number>[] = [];
+  groups.forEach((g) => {
+    const result = g.pureTheoreticalNestingResult;
+    if (!result) return;
+    const patternGroups = groupBarPlansByPattern(result.barPlans);
+    patternGroups.forEach((pg, idx) => {
+      const plan = pg.representative;
+      const piecesByLenLabel = new Map<string, number>();
+      plan.cuts.forEach((c) => {
+        const key = `${c.lengthMm}mm (${c.label})`;
+        piecesByLenLabel.set(key, (piecesByLenLabel.get(key) || 0) + 1);
+      });
+      const piezasStr = Array.from(piecesByLenLabel.entries())
+        .map(([k, qty]) => `${k} x${qty}`)
+        .join('  +  ');
+
+      patronesRows.push({
+        Perfil: g.cleanProfileCode,
+        Calidad: mainGrade(g),
+        'N° Patrón': idx + 1,
+        Origen: plan.sourceLocation || plan.sourceType,
+        'Largo Barra (mm)': plan.sourceLengthMm,
+        Piezas: piezasStr,
+        Repeticiones: pg.repeatCount,
+        'Sobrante por Barra (mm)': plan.remainingMm,
+        'Sobrante Total del Patrón (mm)': pg.totalRemainingMm,
+        '¿Retazo Reutilizable?': plan.isReusableOffcut ? 'Sí' : 'No'
+      });
+    });
+  });
+
+  if (patronesRows.length > 0) {
+    const wsPatrones = XLSX.utils.json_to_sheet(patronesRows);
+    formatSheet(wsPatrones, [16, 10, 10, 32, 14, 55, 13, 18, 22, 16], patronesRows.length);
+    XLSX.utils.book_append_sheet(workbook, wsPatrones, 'Patrones de Corte');
+  }
+
+  // -------------------------------------------------------------------
   // Hoja "Detalle Barra por Barra": el plan de corte completo (Etapa 1,
   // 100% material nuevo), UNA FILA POR PIEZA CORTADA — no una sola celda
   // con todas las piezas de la barra concatenadas — para que se pueda
@@ -131,17 +219,24 @@ export function exportCubicacionSummaryToExcel(
   // en cada fila de sus piezas: es más largo, pero se filtra sin perder
   // contexto (formato "plano" estándar de lista de corte).
   // -------------------------------------------------------------------
+  // "ID Pieza" permite filtrar/agrupar el tramo principal y el tramo
+  // adicional de una misma pieza empalmada aunque terminen en barras
+  // distintas (ver `clasificarEmpalme` arriba para el resto del contexto).
   const detalleRows: Record<string, string | number>[] = [];
   groups.forEach((g) => {
     const result = g.pureTheoreticalNestingResult;
     if (!result) return;
     result.barPlans.forEach((plan) => {
       plan.cuts.forEach((cut) => {
+        const { tipo, rol } = clasificarEmpalme(plan.sourceLocation, cut.label);
         detalleRows.push({
           Perfil: g.cleanProfileCode,
           Calidad: mainGrade(g),
+          'ID Pieza': cut.pieceId,
           'N° Barra': plan.barIndex,
           Origen: plan.sourceLocation || plan.sourceType,
+          'Tipo de Empalme': tipo,
+          'Rol en Empalme': rol,
           'Largo Barra (mm)': plan.sourceLengthMm,
           'N° Corte': cut.cutIndex,
           Pieza: cut.label,
@@ -157,7 +252,7 @@ export function exportCubicacionSummaryToExcel(
 
   if (detalleRows.length > 0) {
     const wsDetalle = XLSX.utils.json_to_sheet(detalleRows);
-    formatSheet(wsDetalle, [16, 10, 9, 30, 14, 9, 30, 14, 16, 15, 14, 14], detalleRows.length);
+    formatSheet(wsDetalle, [16, 10, 22, 9, 30, 18, 16, 14, 9, 30, 14, 16, 15, 14, 14], detalleRows.length);
     XLSX.utils.book_append_sheet(workbook, wsDetalle, 'Detalle Barra por Barra');
   }
 
