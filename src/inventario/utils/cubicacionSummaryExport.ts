@@ -227,6 +227,73 @@ export function exportCubicacionSummaryToExcel(
   }
 
   // -------------------------------------------------------------------
+  // Hoja "Plan de Taller": el MISMO plan de corte pero ordenado para
+  // ejecutarlo, no para auditarlo.
+  //
+  // Criterio de orden: primero los perfiles con más barras (se saca el
+  // material de ese perfil una sola vez y se corta todo junto), y dentro
+  // de cada perfil los patrones MÁS REPETIDOS primero. Así el operador
+  // hace los seteos de sierra que rinden muchas barras al principio y deja
+  // los patrones de una sola barra para el final, que son los que más
+  // tiempo muerto generan por cambio de tope.
+  //
+  // La columna "% Piezas Acum." dice qué porcentaje de las piezas de ese
+  // perfil ya quedó cortado al terminar cada patrón: sirve para ver hasta
+  // dónde llega el grueso del trabajo antes de entrar en los patrones
+  // sueltos.
+  // -------------------------------------------------------------------
+  const tallerRows: Record<string, string | number>[] = [];
+  const groupsByWorkload = [...groups].sort(
+    (a, b) => (b.pureTheoreticalNestingResult?.totalBarsUsed || 0) - (a.pureTheoreticalNestingResult?.totalBarsUsed || 0)
+  );
+  let ordenCorte = 0;
+  groupsByWorkload.forEach((g) => {
+    const result = g.pureTheoreticalNestingResult;
+    if (!result || result.barPlans.length === 0) return;
+    const patterns = groupBarPlansByPattern(result.barPlans).sort((a, b) => b.repeatCount - a.repeatCount);
+    const piezasDelPerfil = result.barPlans.reduce((s, p) => s + p.cuts.length, 0);
+    let acumPiezas = 0;
+
+    patterns.forEach((pg) => {
+      const plan = pg.representative;
+      ordenCorte++;
+      const piezasEstePatron = plan.cuts.length * pg.repeatCount;
+      acumPiezas += piezasEstePatron;
+
+      const porLargo = new Map<number, number>();
+      plan.cuts.forEach((c) => porLargo.set(c.lengthMm, (porLargo.get(c.lengthMm) || 0) + 1));
+      const receta = Array.from(porLargo.entries())
+        .sort((a, b) => b[0] - a[0])
+        .map(([len, qty]) => (qty > 1 ? `${len} x${qty}` : `${len}`))
+        .join(' + ');
+
+      const conSoldadura = plan.cuts.some((c) => clasificarEmpalme(plan.sourceLocation, c.label).rol !== '');
+
+      tallerRows.push({
+        Orden: ordenCorte,
+        Perfil: g.cleanProfileCode,
+        Calidad: mainGrade(g),
+        'Barras de este Patrón': pg.repeatCount,
+        'Largo Barra (mm)': plan.sourceLengthMm,
+        'Cortes por Barra': plan.cuts.length,
+        'Receta de Corte (mm)': receta,
+        'Topes de Sierra (mm)': plan.cuts.map((c) => c.stopPositionMm).join(' | '),
+        'Piezas que Rinde': piezasEstePatron,
+        '% Piezas Acum.': Number(((acumPiezas / piezasDelPerfil) * 100).toFixed(1)),
+        '¿Lleva Soldadura?': conSoldadura ? 'Sí' : 'No',
+        'Sobrante por Barra (mm)': plan.remainingMm,
+        'Destino Sobrante': plan.isReusableOffcut ? 'Guardar retazo' : 'Merma'
+      });
+    });
+  });
+
+  if (tallerRows.length > 0) {
+    const wsTaller = XLSX.utils.json_to_sheet(tallerRows);
+    formatSheet(wsTaller, [7, 16, 9, 18, 14, 14, 40, 40, 14, 13, 15, 18, 16], tallerRows.length);
+    XLSX.utils.book_append_sheet(workbook, wsTaller, 'Plan de Taller');
+  }
+
+  // -------------------------------------------------------------------
   // Hoja "Detalle Barra por Barra": el plan de corte completo (Etapa 1,
   // 100% material nuevo), UNA FILA POR PIEZA CORTADA — no una sola celda
   // con todas las piezas de la barra concatenadas — para que se pueda
