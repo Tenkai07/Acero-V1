@@ -47,8 +47,32 @@ export function run1DNestingOptimization(
     trimCutMm = 10,
     minUsableOffcutMm = 1000,
     prioritizeOffcuts = true,
-    useExactFill = false
+    useExactFill = false,
+    randomSeed
   } = settings;
+
+  // Generador determinista (mismo seed ⇒ misma solución, para que un
+  // resultado sea reproducible y auditable). Sin seed, el anidado queda
+  // 100% determinista como siempre.
+  const rng: (() => number) | null = (() => {
+    if (randomSeed === undefined) return null;
+    // splitmix32. Se probó antes un LCG simple y resultó inservible acá:
+    // con semillas chicas y correlativas sus PRIMEROS valores salían todos
+    // bajos y proporcionales a la semilla (0,14 / 0,24 / 0,34 …), así que
+    // ninguna corrida llegaba a cruzar el umbral y las 300 semillas daban
+    // exactamente la misma solución. Este mezclador decorrelaciona la
+    // semilla desde el primer valor.
+    let state = randomSeed | 0;
+    return () => {
+      state = (state + 0x9e3779b9) | 0;
+      let t = state ^ (state >>> 16);
+      t = Math.imul(t, 0x21f0aaad);
+      t = t ^ (t >>> 15);
+      t = Math.imul(t, 0x735a2d97);
+      t = t ^ (t >>> 15);
+      return (t >>> 0) / 4294967296;
+    };
+  })();
 
   // 1. Flatten requested pieces
   const piecesToCut: FlatPiece[] = [];
@@ -343,7 +367,7 @@ export function run1DNestingOptimization(
     for (const offcut of offcutSources) {
       if (unassignedPieces.length === 0) break;
 
-      const plan = tryPackBar(offcut, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter, useExactFill);
+      const plan = tryPackBar(offcut, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter, useExactFill, rng);
       if (plan && plan.cuts.length > 0) {
         offcut.used = true;
         barPlans.push(plan);
@@ -367,7 +391,7 @@ export function run1DNestingOptimization(
   for (const stdBar of standardSources) {
     if (unassignedPieces.length === 0) break;
 
-    const plan = tryPackBar(stdBar, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter, useExactFill);
+    const plan = tryPackBar(stdBar, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter, useExactFill, rng);
     if (plan && plan.cuts.length > 0) {
       stdBar.used = true;
       barPlans.push(plan);
@@ -411,7 +435,7 @@ export function run1DNestingOptimization(
         location: 'Por Comprar / Solicitar',
         used: true
       };
-      const trialPlan = tryPackBar(trialBar, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter, useExactFill);
+      const trialPlan = tryPackBar(trialBar, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter, useExactFill, rng);
       // A igual eficiencia (empate exacto, típico cuando un largo es
       // múltiplo entero de otro — ej. 2 piezas de 4290mm en una barra de
       // 12m da la MISMA eficiencia que 1 pieza de 4290mm en una de 6m,
@@ -558,7 +582,7 @@ export function run1DNestingOptimization(
             location: 'Por Comprar / Solicitar',
             used: true
           };
-          const trialPlan = tryPackBar(trialBar, fillerSim, kerfMm, trimCutMm, minUsableOffcutMm, simCounter, useExactFill);
+          const trialPlan = tryPackBar(trialBar, fillerSim, kerfMm, trimCutMm, minUsableOffcutMm, simCounter, useExactFill, rng);
           // Mismo desempate que en la Fase C: a igual eficiencia, preferir
           // la barra más grande (menos barras físicas por el mismo material).
           if (
@@ -652,6 +676,108 @@ export function run1DNestingOptimization(
         });
       }
     }
+  }
+
+  // 5.7 Pasada de MEJORA: intentar eliminar barras completas.
+  //
+  // El anidado es barra por barra: se llena una, se cierra, se pasa a la
+  // siguiente. Eso deja un patrón típico al final — unas pocas barras muy
+  // vacías con las piezas que ya no combinaban con nada — mientras que
+  // repartidas entre el espacio libre de las demás sí habrían cabido.
+  //
+  // Acá se toma la barra MÁS VACÍA, se sacan sus piezas y se intenta
+  // meterlas en el espacio libre que quedó en las otras barras. Si TODAS
+  // encuentran lugar, esa barra desaparece (una barra menos que comprar) y
+  // se repite el intento con la siguiente más vacía. Si alguna pieza queda
+  // sin lugar, se revierte todo y se corta la pasada.
+  //
+  // Solo se sacan barras nuevas normales: las de empalme (`oversized` /
+  // `splitopt`) llevan tramos que son parte de una pieza más larga, no
+  // piezas completas, y moverlos rompería el empalme.
+  const isSpliceRelatedPlan = (p: CutBarPlan) =>
+    p.id.startsWith('bar-plan-oversized-') || p.id.startsWith('bar-plan-splitopt-');
+
+  const cutToPiece = (c: CutPieceDetail): FlatPiece => {
+    const sep = c.pieceId.lastIndexOf('_');
+    return {
+      originalId: c.pieceId.slice(0, sep),
+      label: c.label,
+      lengthMm: c.lengthMm,
+      color: c.color,
+      instanceIndex: Number(c.pieceId.slice(sep + 1))
+    };
+  };
+
+  const planToSource = (p: CutBarPlan): StockSourceOption => ({
+    id: p.id,
+    type: p.sourceType,
+    lengthMm: p.sourceLengthMm,
+    offcutId: p.sourceOffcutId,
+    location: p.sourceLocation,
+    used: true
+  });
+
+  const tryEliminateOneBar = (): boolean => {
+    const victimCandidates = barPlans
+      .map((p, idx) => ({ p, idx }))
+      .filter(({ p }) => p.sourceType === 'new_purchased_bar' && !isSpliceRelatedPlan(p))
+      .sort((a, b) => b.p.remainingMm - a.p.remainingMm);
+    if (victimCandidates.length < 2) return false;
+
+    const victim = victimCandidates[0];
+    let loose = victim.p.cuts.map(cutToPiece);
+    if (loose.length === 0) return false;
+
+    // Barras destino: cualquier otra que no sea de empalme, de la más
+    // vacía a la más llena (donde más fácil entra algo).
+    const targets = barPlans
+      .map((p, idx) => ({ p, idx }))
+      .filter(({ p, idx }) => idx !== victim.idx && !isSpliceRelatedPlan(p))
+      .sort((a, b) => b.p.remainingMm - a.p.remainingMm);
+
+    const rebuilt = new Map<number, CutBarPlan>();
+
+    for (const target of targets) {
+      if (loose.length === 0) break;
+      const current = rebuilt.get(target.idx) || target.p;
+      // Agregar una pieza a una barra que ya tiene cortes cuesta su largo
+      // MÁS un kerf. `bestFillExact` razona sobre Σ(largo+kerf) ≤ cap+kerf,
+      // así que para acotarlo al hueco real hay que pasarle `hueco - kerf`.
+      const room = current.remainingMm - kerfMm;
+      if (room <= 0) continue;
+
+      const fill = bestFillExact(loose, room, kerfMm);
+      if (!fill || fill.selected.length === 0) continue;
+
+      const chosenKeys = new Set(fill.selected.map((p) => `${p.originalId}_${p.instanceIndex}`));
+      const merged = [...current.cuts.map(cutToPiece), ...fill.selected];
+      const newPlan = buildBarPlan(planToSource(current), merged, kerfMm, current.trimCutMm, minUsableOffcutMm, current.barIndex);
+      if (!newPlan) continue;
+
+      rebuilt.set(target.idx, newPlan);
+      loose = loose.filter((p) => !chosenKeys.has(`${p.originalId}_${p.instanceIndex}`));
+    }
+
+    if (loose.length > 0) return false; // no cupo todo: no se toca nada
+
+    rebuilt.forEach((plan, idx) => {
+      barPlans[idx] = plan;
+    });
+    barPlans.splice(victim.idx, 1);
+    return true;
+  };
+
+  if (useExactFill) {
+    // Acotada por seguridad: cada intento fallido cuesta una pasada
+    // completa sobre las barras, y en proyectos grandes no vale la pena
+    // insistir indefinidamente.
+    let guard = barPlans.length + 5;
+    while (guard-- > 0 && tryEliminateOneBar()) {
+      /* sigue mientras se puedan eliminar barras */
+    }
+    barPlans.forEach((p, idx) => {
+      p.barIndex = idx + 1;
+    });
   }
 
   // 6. Aggregate results and statistics
@@ -755,7 +881,8 @@ function tryPackBar(
   trimCutMm: number,
   minUsableOffcutMm: number,
   barIndex: number,
-  useExactFill: boolean
+  useExactFill: boolean,
+  rng: (() => number) | null
 ): CutBarPlan | null {
   const barLength = source.lengthMm;
   const usableCapacity = barLength - trimCutMm;
@@ -816,17 +943,49 @@ function tryPackBar(
     return { selected, used };
   };
 
-  let bestFill = fillGreedyFrom(0);
-  const triedLengths = new Set<number>([availablePieces[0]?.lengthMm]);
   // Ancla en cada largo DISTINTO (no cada instancia — probar 50 anclas
   // idénticas de 6000mm no aporta nada más que la primera) para acotar el
   // costo cuando hay cientos de piezas del mismo largo.
+  const fills: { selected: FlatPiece[]; used: number }[] = [fillGreedyFrom(0)];
+  const triedLengths = new Set<number>([availablePieces[0]?.lengthMm]);
   for (let i = 1; i < availablePieces.length; i++) {
     const len = availablePieces[i].lengthMm;
     if (triedLengths.has(len)) continue;
     triedLengths.add(len);
-    const candidate = fillGreedyFrom(i);
-    if (candidate.used > bestFill.used) bestFill = candidate;
+    fills.push(fillGreedyFrom(i));
+  }
+  fills.sort((a, b) => b.used - a.used);
+
+  // Deduplicar por CONTENIDO: anclas distintas suelen converger al mismo
+  // conjunto de piezas (anclar en 5579 y anclar en 4912 terminan ambas en
+  // {13448, 5579, 4912}). Sin deduplicar, "elegir al azar entre los 8
+  // mejores" en la práctica devuelve siempre el mismo llenado y el
+  // multi-arranque no explora nada.
+  const distinctFills: { selected: FlatPiece[]; used: number }[] = [];
+  const seenSignatures = new Set<string>();
+  for (const f of fills) {
+    const signature = f.selected
+      .map((p) => p.lengthMm)
+      .sort((a, b) => a - b)
+      .join(',');
+    if (seenSignatures.has(signature)) continue;
+    seenSignatures.add(signature);
+    distinctFills.push(f);
+  }
+
+  // Sin semilla: siempre el mejor llenado (determinista). Con semilla: a
+  // veces se toma uno de los siguientes mejores. Suena contraproducente,
+  // pero llenar cada barra al máximo es una decisión LOCAL — a menudo
+  // consume las piezas chicas que después harían falta para completar
+  // otras barras. Aceptar de vez en cuando un llenado apenas peor abre
+  // soluciones globales mejores; `multiNestingEngine` repite el anidado
+  // con varias semillas y se queda con el mejor resultado del perfil.
+  let bestFill = distinctFills[0];
+  if (rng && distinctFills.length > 1) {
+    if (rng() > 0.55) {
+      const pool = Math.min(distinctFills.length, 6);
+      bestFill = distinctFills[Math.floor(rng() * pool)];
+    }
   }
 
   // Búsqueda EXACTA del mejor llenado posible de esta barra (knapsack

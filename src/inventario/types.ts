@@ -111,6 +111,12 @@ export interface OptimizationSettings {
   // siempre mejora el total del perfil — `multiNestingEngine` prueba las
   // dos variantes y se queda con la que compre menos material.
   useExactFill?: boolean;
+  // Semilla para desempatar al azar entre llenados casi equivalentes. Sin
+  // ella el anidado es determinista y siempre cae en la misma solución;
+  // con distintas semillas se exploran soluciones distintas y se puede
+  // quedar con la mejor (multi-arranque). No cambia ninguna regla de
+  // negocio, solo por dónde empieza a buscar.
+  randomSeed?: number;
 }
 
 export interface OversizedPieceOption {

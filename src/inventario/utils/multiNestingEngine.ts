@@ -11,6 +11,23 @@ import { COLOR_PALETTE } from '../data/initialStock';
 import { getReservedBarsCount, getReservedOffcuts } from './stockReservations';
 import { inferAlternateBarLengths } from './commercialLengths';
 
+/**
+ * Cuántas semillas de multi-arranque se prueban por perfil además de la
+ * corrida determinista (ver `randomSeed` en OptimizationSettings).
+ *
+ * En 0 a propósito, con evidencia: se midió sobre el proyecto real P420
+ * (67 perfiles, 2295 piezas) con 60 semillas por perfil y el resultado fue
+ * EXACTAMENTE el mismo (1362 barras, 14.262m) tardando 17,9s en vez de
+ * 4,7s. En el perfil más difícil (RHS100X5) se probaron 300 semillas y las
+ * 300 dieron el mismo número de barras. O sea: el multi-arranque sobre
+ * este heurístico no escapa del óptimo local, solo cuesta tiempo.
+ *
+ * Se deja la infraestructura porque el hallazgo es útil: si algún día se
+ * cambia el heurístico de llenado, subir este número vuelve a tener
+ * sentido y ya está todo conectado. Mientras tanto, 0 = sin costo.
+ */
+const MULTISTART_SEEDS = 0;
+
 export interface ConsolidatedPurchaseReport {
   totalProfilesCount: number;
   totalPiecesCount: number;
@@ -210,15 +227,29 @@ export function runProjectPreNesting(
       }
     };
 
+    // `undefined` = corrida determinista (siempre el mejor llenado local).
+    // Los números son semillas de multi-arranque: cada una explora una
+    // solución distinta y nos quedamos con la mejor del perfil completo.
+    // Es lo que permite escapar del atasco típico del anidado voraz —
+    // llenar las primeras barras al máximo consume las piezas chicas que
+    // después harían falta para completar las últimas.
+    const seeds: (number | undefined)[] = [undefined];
+    for (let s = 1; s <= MULTISTART_SEEDS; s++) seeds.push(s * 7919);
+
     for (const exact of [false, true]) {
-      const variantSettings = { ...theoreticalSettings, useExactFill: exact };
-      for (const len of candidateLengths) {
-        considerTheoretical(
-          run1DNestingOptimization(pureTheoreticalMaterial, pieceRequests, variantSettings, [len]),
-          len
-        );
-        if (settings.allowMultipleStandardLengths) {
-          considerTheoretical(runSplicedStripNesting(pureTheoreticalMaterial, pieceRequests, variantSettings, len), len);
+      for (const seed of seeds) {
+        // El knapsack exacto es caro; con él basta la corrida determinista
+        // (ya busca el óptimo de cada barra, el azar aporta mucho menos).
+        if (exact && seed !== undefined) continue;
+        const variantSettings = { ...theoreticalSettings, useExactFill: exact, randomSeed: seed };
+        for (const len of candidateLengths) {
+          considerTheoretical(
+            run1DNestingOptimization(pureTheoreticalMaterial, pieceRequests, variantSettings, [len]),
+            len
+          );
+          if (settings.allowMultipleStandardLengths) {
+            considerTheoretical(runSplicedStripNesting(pureTheoreticalMaterial, pieceRequests, variantSettings, len), len);
+          }
         }
       }
     }
@@ -304,11 +335,14 @@ export function runProjectPreNesting(
     // cuánto material NUEVO compra cada alternativa, que es justo lo que
     // cambia entre ellas.
     for (const exact of [false, true]) {
-      const variantSettings = { ...settings, useExactFill: exact };
-      for (const len of candidateLengths) {
-        considerStock(run1DNestingOptimization(effectiveMaterial, pieceRequests, variantSettings, [len]), len);
-        if (settings.allowMultipleStandardLengths) {
-          considerStock(runSplicedStripNesting(effectiveMaterial, pieceRequests, variantSettings, len), len);
+      for (const seed of seeds) {
+        if (exact && seed !== undefined) continue;
+        const variantSettings = { ...settings, useExactFill: exact, randomSeed: seed };
+        for (const len of candidateLengths) {
+          considerStock(run1DNestingOptimization(effectiveMaterial, pieceRequests, variantSettings, [len]), len);
+          if (settings.allowMultipleStandardLengths) {
+            considerStock(runSplicedStripNesting(effectiveMaterial, pieceRequests, variantSettings, len), len);
+          }
         }
       }
     }
