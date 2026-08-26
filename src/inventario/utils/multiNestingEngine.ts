@@ -8,6 +8,7 @@ import {
 import { run1DNestingOptimization } from './nesting1D';
 import { COLOR_PALETTE } from '../data/initialStock';
 import { getReservedBarsCount, getReservedOffcuts } from './stockReservations';
+import { inferAlternateBarLengths } from './commercialLengths';
 
 export interface ConsolidatedPurchaseReport {
   totalProfilesCount: number;
@@ -121,14 +122,30 @@ export function runProjectPreNesting(
         ? group.totalWeightKg / totalGroupLengthM
         : matchedMat?.theoreticalWeightPerMeter || 5.0;
 
-    const barLength = group.commercialBarLengthMm || matchedMat?.standardBarLengthMm || 6000;
+    // Largos comerciales candidatos para este perfil: el estándar de 6m
+    // siempre se evalúa, más cualquier largo alternativo — manual si el
+    // material ya lo tiene configurado en bodega, o inferido automáticamente
+    // por tipo de perfil/espesor si no (ej. tubulares RHS/SHS: 6m y 12m
+    // siempre; ángulos: 6m salvo que sean gruesos ≥8mm).
+    const alternateLengths =
+      matchedMat?.alternateBarLengthsMm || inferAlternateBarLengths(group.cleanProfileCode, matchedMat?.category) || [];
+    const candidateLengths = Array.from(
+      new Set([group.commercialBarLengthMm || matchedMat?.standardBarLengthMm || 6000, 6000, ...alternateLengths])
+    );
 
-    // 1. PURE THEORETICAL 1D NESTING (100% new bars, 0 stock)
+    // El largo "principal" (para mostrar en la ficha del grupo y para
+    // materiales ya en bodega, cuyo stock físico real está a un largo fijo)
+    // sigue siendo el registrado en inventario si existe; si es un material
+    // "virtual" (aún no en bodega) se usa el primero de los candidatos —ya
+    // no importa mucho cuál, porque abajo se elige el mejor largo BARRA POR
+    // BARRA, no uno solo fijo para todo el lote.
+    const barLength = matchedMat?.standardBarLengthMm || candidateLengths[0];
+
     const pureTheoreticalMaterial: MaterialStockItem = {
       id: `pure-theo-${group.id}`,
       code: group.cleanProfileCode,
       name: group.profileName,
-      category: 'otro',
+      category: matchedMat?.category || 'otro',
       dimensions: group.cleanProfileCode,
       grade: group.pieces[0]?.grade || 'A36',
       theoreticalWeightPerMeter: derivedKgM,
@@ -138,13 +155,65 @@ export function runProjectPreNesting(
       offcuts: [],
       minStockBars: 0,
       location: 'Material Nuevo',
-      lastUpdated: new Date().toISOString()
+      lastUpdated: new Date().toISOString(),
+      // Sin esto, evaluateOversizedPieceOptions solo veía UN largo (el de
+      // standardBarLengthMm) al decidir empalmes, perdiendo la posibilidad
+      // de combinar 6m+12m o 12m+12m — quedaba igual de limitado que antes
+      // de "profundizar" el empalme multi-largo.
+      alternateBarLengthsMm: alternateLengths.length > 0 ? alternateLengths : undefined
     };
-    const pureTheoreticalNestingResult = run1DNestingOptimization(
+
+    // 1. PURE THEORETICAL 1D NESTING (100% new bars, 0 stock) — se prueban
+    // dos estrategias y se elige la que consuma menos material bruto total:
+    // (a) "mixta", eligiendo el mejor largo barra por barra sobre la marcha,
+    // y (b) "fija al largo más grande", comprando solo del largo comercial
+    // mayor disponible (ej. 12m). La mixta suele ganar, pero no siempre — a
+    // veces comprometerse al largo más grande evita remanentes chicos que
+    // la elección local, barra a barra, no ve venir.
+    //
+    // A propósito NO se prueba "fija a un largo MENOR" (ej. forzar 6m
+    // cuando también hay 12m disponible): eso crearía un escenario
+    // ficticio que obliga a empalmar piezas que en la realidad ya caben
+    // enteras en una barra de 12m real, y ese empalme "gratis" en papel
+    // (pérdida de saneo baja) le ganaría a la barra grande por matemática
+    // pura de desperdicio — aunque el usuario prefiere evitar empalmes
+    // siempre que una barra ya cubra la pieza entera.
+    const theoreticalSettings = { ...settings, prioritizeOffcuts: false };
+    const largestCandidateLength = Math.max(...candidateLengths);
+    let pureTheoreticalNestingResult = run1DNestingOptimization(
       pureTheoreticalMaterial,
       pieceRequests,
-      { ...settings, prioritizeOffcuts: false }
+      theoreticalSettings,
+      candidateLengths
     );
+    for (const len of [largestCandidateLength]) {
+      const fixedResult = run1DNestingOptimization(pureTheoreticalMaterial, pieceRequests, theoreticalSettings, [len]);
+      // Nunca preferir una variante que deja MÁS piezas sin cortar que la
+      // mejor encontrada hasta ahora (ej. "solo 6m" cuando hay piezas de
+      // 8m) — su totalRawMaterialLengthMm luce artificialmente bajo por no
+      // haber comprado material para esas piezas, no por ser más eficiente.
+      // Piezas que ninguna variante puede resolver (más largas que
+      // cualquier largo candidato — necesitan empalme múltiple, ver
+      // spliceCalculator.ts) sí quedan igual de "missing" en todas, y ahí
+      // el desempate es netamente por menor material bruto.
+      if (
+        fixedResult.missingPieces.length <= pureTheoreticalNestingResult.missingPieces.length &&
+        fixedResult.totalRawMaterialLengthMm < pureTheoreticalNestingResult.totalRawMaterialLengthMm
+      ) {
+        pureTheoreticalNestingResult = fixedResult;
+      }
+    }
+    // El largo "predominante" real (para mostrar en pantalla/Excel) es el
+    // más usado entre las barras nuevas del resultado ganador — nunca
+    // simplemente el primer candidato de la lista, que no necesariamente
+    // es el que terminó usándose (ej. si ganó "fijo a 12m", mostrar "6m"
+    // sería directamente incorrecto).
+    const newBarLengthCounts = new Map<number, number>();
+    pureTheoreticalNestingResult.barPlans
+      .filter((p) => p.sourceType === 'new_purchased_bar')
+      .forEach((p) => newBarLengthCounts.set(p.sourceLengthMm, (newBarLengthCounts.get(p.sourceLengthMm) || 0) + 1));
+    const bestLength =
+      [...newBarLengthCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || candidateLengths[0];
 
     // 2. STOCK-OPTIMIZED 1D NESTING (Consumes warehouse offcuts and stock bars first)
     const effectiveMaterial: MaterialStockItem = matchedMat
@@ -163,10 +232,28 @@ export function runProjectPreNesting(
           offcuts: [],
           minStockBars: 0,
           location: 'No registrado en bodega',
-          lastUpdated: new Date().toISOString()
+          lastUpdated: new Date().toISOString(),
+          alternateBarLengthsMm: alternateLengths.length > 0 ? alternateLengths : undefined
         };
 
-    const nestingRes = run1DNestingOptimization(effectiveMaterial, pieceRequests, settings);
+    // Igual que en el cálculo teórico: se prueba la estrategia mixta
+    // (mejor largo barra por barra) y cada largo fijo por separado, y se
+    // elige la que compre MENOS material nuevo en total — el stock
+    // existente en bodega es el mismo en cualquier caso, lo único que
+    // cambia entre variantes es cuánto y de qué largo hay que comprar.
+    const newBoughtLengthMm = (r: OptimizationResult) =>
+      r.barPlans.filter((p) => p.sourceType === 'new_purchased_bar').reduce((s, p) => s + p.sourceLengthMm, 0);
+
+    let nestingRes = run1DNestingOptimization(effectiveMaterial, pieceRequests, settings, candidateLengths);
+    for (const len of [largestCandidateLength]) {
+      const fixedRes = run1DNestingOptimization(effectiveMaterial, pieceRequests, settings, [len]);
+      if (
+        fixedRes.missingPieces.length <= nestingRes.missingPieces.length &&
+        newBoughtLengthMm(fixedRes) < newBoughtLengthMm(nestingRes)
+      ) {
+        nestingRes = fixedRes;
+      }
+    }
 
     // Stock check
     const stockBarsAvail = effectiveMaterial.standardBarsCount;
@@ -176,9 +263,19 @@ export function runProjectPreNesting(
     const offcutsFromStock = nestingRes.stockOffcutsUsed;
     const barsToBuy = nestingRes.newBarsToBuy;
 
-    const metersToBuy = (barsToBuy * effectiveMaterial.standardBarLengthMm) / 1000;
+    // El mix comprado puede tener varios largos (ej. algunas barras de 6m y
+    // otras de 12m) — se calculan los metros reales sumando cada barra
+    // comprada por su propio largo, en vez de asumir un único largo fijo.
+    const newBarPlans = nestingRes.barPlans.filter((p) => p.sourceType === 'new_purchased_bar');
+    const metersToBuy = newBarPlans.reduce((s, p) => s + p.sourceLengthMm, 0) / 1000;
     const weightToBuyKg = Number((metersToBuy * effectiveMaterial.theoreticalWeightPerMeter).toFixed(2));
     const costToBuy = Math.round(metersToBuy * effectiveMaterial.costPerMeter);
+    const buyBreakdownByLength = new Map<number, number>();
+    newBarPlans.forEach((p) => buyBreakdownByLength.set(p.sourceLengthMm, (buyBreakdownByLength.get(p.sourceLengthMm) || 0) + 1));
+    const buyBreakdownLabel = Array.from(buyBreakdownByLength.entries())
+      .sort((a, b) => b[0] - a[0])
+      .map(([len, count]) => `${count} de ${(len / 1000).toLocaleString('es-CL')}m`)
+      .join(' + ');
 
     const hasEnoughStock = barsToBuy === 0;
     const status = !matchedMat
@@ -197,11 +294,12 @@ export function runProjectPreNesting(
     const message =
       (hasEnoughStock
         ? `✅ Stock suficiente en bodega (Consumo: ${barsFromStock} barras + ${offcutsFromStock} retazos)`
-        : `🛒 Debes comprar ${barsToBuy} barras de ${(effectiveMaterial.standardBarLengthMm / 1000).toFixed(0)}m (${metersToBuy.toFixed(2)} m)`) +
+        : `🛒 Debes comprar ${barsToBuy} barras (${buyBreakdownLabel || `${(effectiveMaterial.standardBarLengthMm / 1000).toFixed(0)}m`}) — ${metersToBuy.toFixed(2)} m totales`) +
       reservedNote;
 
     const updatedGroup: BOMProfileGroup = {
       ...group,
+      commercialBarLengthMm: bestLength,
       pureTheoreticalNestingResult,
       nestingResult: nestingRes,
       stockComparison: {
@@ -228,7 +326,7 @@ export function runProjectPreNesting(
     totalWeightKg += group.totalWeightKg;
 
     const groupTheoBars = pureTheoreticalNestingResult.totalBarsUsed;
-    const groupTheoMeters = (groupTheoBars * barLength) / 1000;
+    const groupTheoMeters = pureTheoreticalNestingResult.totalRawMaterialLengthMm / 1000;
     const groupTheoWeight = groupTheoMeters * derivedKgM;
 
     totalTheoreticalBarsNeeded += groupTheoBars;

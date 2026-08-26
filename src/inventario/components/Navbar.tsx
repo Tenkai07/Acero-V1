@@ -39,52 +39,71 @@ export const Navbar = ({
   const totalStandardBars = inventory.reduce((s, m) => s + m.standardBarsCount, 0);
   const totalOffcuts = inventory.reduce((s, m) => s + m.offcuts.length, 0);
 
-  const tabs = [
+  // El flujo real es lineal (1 -> 2 -> 3 -> 4), con "Empalmes" como paso
+  // opcional intermedio. "Historial" y "Bodega" NO son pasos siguientes de
+  // ese flujo — son secciones de referencia disponibles en cualquier
+  // momento (por eso antes numerarlas "5." y "6." junto a las demás
+  // confundía, sugiriendo un orden que no existe). Se agrupan aparte.
+  const flowTabs = [
     {
       id: 'importar',
-      label: '1. Importar Planilla (BOM)',
-      shortLabel: '1. Importar',
+      step: 1,
+      label: 'Importar Planilla (BOM)',
+      shortLabel: 'Importar',
       icon: FileSpreadsheet,
       badge: totalProfilesLoaded > 0 ? `${totalProfilesLoaded} perfiles` : undefined,
       badgeColor: 'bg-blue-100 text-blue-800 border-blue-200'
     },
     {
       id: 'empalmes',
-      label: '2. Medidas & Empalmes',
-      shortLabel: '2. Empalmes',
-      icon: Scissors
+      step: 2,
+      label: 'Medidas & Empalmes',
+      shortLabel: 'Empalmes',
+      icon: Scissors,
+      optional: true,
+      badge: undefined as string | undefined,
+      badgeColor: undefined as string | undefined
     },
     {
       id: 'preanidado',
-      label: '3. Pre-Anidado & Stock',
-      shortLabel: '3. Pre-Anidado',
+      step: 3,
+      label: 'Pre-Anidado & Stock',
+      shortLabel: 'Pre-Anidado',
       icon: Cpu,
       badge: totalBarsToBuy > 0 ? `Comprar: ${totalBarsToBuy} b.` : undefined,
       badgeColor: totalBarsToBuy > 0 ? 'bg-rose-100 text-rose-800 border-rose-200 font-bold animate-pulse' : undefined
     },
     {
       id: 'compras',
-      label: '4. Orden de Compra & Taller',
-      shortLabel: '4. Compras',
-      icon: ShoppingCart
-    },
+      step: 4,
+      label: 'Orden de Compra & Taller',
+      shortLabel: 'Compras',
+      icon: ShoppingCart,
+      badge: undefined as string | undefined,
+      badgeColor: undefined as string | undefined
+    }
+  ];
+
+  const resourceTabs = [
     {
       id: 'historial',
-      label: '5. Historial de Proyectos',
-      shortLabel: '5. Historial',
+      label: 'Historial de Proyectos',
+      shortLabel: 'Historial',
       icon: FolderClock,
       badge: savedProjectsCount > 0 ? `${savedProjectsCount}` : undefined,
       badgeColor: 'bg-amber-100 text-amber-800 border-amber-200'
     },
     {
       id: 'inventario',
-      label: '6. Base de Datos / Bodega',
-      shortLabel: '6. Bodega',
+      label: 'Base de Datos / Bodega',
+      shortLabel: 'Bodega',
       icon: Database,
       badge: `${totalStandardBars} b. / ${totalOffcuts} ret.`,
       badgeColor: 'bg-slate-100 text-slate-700 border-slate-200'
     }
-  ];
+  ] as const;
+
+  const activeFlowIndex = flowTabs.findIndex((t) => t.id === activeTab);
 
   return (
     <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
@@ -149,40 +168,100 @@ export const Navbar = ({
           </div>
         </div>
 
-        {/* Navigation Tabs */}
-        <nav className="flex space-x-1 sm:space-x-2 border-t border-slate-100 py-1.5 overflow-x-auto scrollbar-none">
-          {tabs.map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
+        {/* Flujo principal: pasos 1-4, numerados y conectados para dejar claro
+            que son secuenciales (Empalmes marcado como opcional). */}
+        <nav className="flex items-center border-t border-slate-100 py-2 overflow-x-auto scrollbar-none">
+          <div className="flex items-center shrink-0">
+            {flowTabs.map((tab, idx) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              const isDone = idx < activeFlowIndex;
 
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
-                className={`flex items-center gap-1.5 sm:gap-2 px-3 sm:px-3.5 py-2 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
-                  isActive
-                    ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-                }`}
-              >
-                <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-500'}`} />
-                <span className="hidden md:inline">{tab.label}</span>
-                <span className="md:hidden">{tab.shortLabel}</span>
-
-                {tab.badge && (
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded-md border font-bold ${
+              return (
+                <div key={tab.id} className="flex items-center">
+                  {idx > 0 && (
+                    <div className={`w-4 sm:w-6 h-0.5 shrink-0 ${isDone || isActive ? 'bg-blue-300' : 'bg-slate-200'}`} />
+                  )}
+                  <button
+                    onClick={() => setActiveTab(tab.id as any)}
+                    className={`flex items-center gap-1.5 sm:gap-2 pl-1.5 pr-3 sm:pr-3.5 py-1.5 rounded-full text-xs sm:text-sm font-semibold transition-all whitespace-nowrap ${
                       isActive
-                        ? 'bg-white/20 text-white border-white/30'
-                        : tab.badgeColor || 'bg-slate-100 text-slate-700 border-slate-200'
+                        ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30'
+                        : isDone
+                        ? 'bg-blue-50 text-blue-800 hover:bg-blue-100'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
                     }`}
                   >
-                    {tab.badge}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+                    <span
+                      className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black shrink-0 ${
+                        isActive ? 'bg-white/25 text-white' : isDone ? 'bg-blue-600 text-white' : 'bg-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {tab.step}
+                    </span>
+                    <Icon className={`w-4 h-4 hidden sm:block ${isActive ? 'text-white' : 'text-slate-500'}`} />
+                    <span className="hidden md:inline">{tab.label}</span>
+                    <span className="md:hidden">{tab.shortLabel}</span>
+                    {'optional' in tab && tab.optional && (
+                      <span
+                        className={`text-[9px] font-bold px-1 py-0.5 rounded ${
+                          isActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'
+                        }`}
+                      >
+                        opcional
+                      </span>
+                    )}
+                    {tab.badge && (
+                      <span
+                        className={`text-[10px] px-1.5 py-0.5 rounded-md border font-bold ${
+                          isActive
+                            ? 'bg-white/20 text-white border-white/30'
+                            : tab.badgeColor || 'bg-slate-100 text-slate-700 border-slate-200'
+                        }`}
+                      >
+                        {tab.badge}
+                      </span>
+                    )}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Separador visual antes de las secciones de referencia */}
+          <div className="w-px h-6 bg-slate-200 mx-2.5 shrink-0 hidden sm:block" />
+
+          {/* Recursos: no son "siguientes pasos", están disponibles siempre */}
+          <div className="flex items-center gap-1 shrink-0">
+            {resourceTabs.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id as any)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all whitespace-nowrap border border-dashed ${
+                    isActive
+                      ? 'bg-slate-900 text-white border-slate-900'
+                      : 'text-slate-500 border-slate-300 hover:text-slate-800 hover:bg-slate-100'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
+                  <span className="hidden md:inline">{tab.label}</span>
+                  <span className="md:hidden">{tab.shortLabel}</span>
+                  {tab.badge && (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded-md border font-bold ${
+                        isActive ? 'bg-white/20 text-white border-white/30' : tab.badgeColor
+                      }`}
+                    >
+                      {tab.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
         </nav>
       </div>
     </header>

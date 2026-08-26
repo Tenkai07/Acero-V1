@@ -44,6 +44,7 @@ interface PreNestingStockViewProps {
   onOpenOperatorGuide?: (result: OptimizationResult, material: MaterialStockItem) => void;
   onOpenSaveModal?: () => void;
   onOpenStockLookup?: () => void;
+  onProceedToSplice?: () => void;
 }
 
 export const PreNestingStockView = ({
@@ -55,7 +56,8 @@ export const PreNestingStockView = ({
   onProceedToPurchases,
   onOpenOperatorGuide,
   onOpenSaveModal,
-  onOpenStockLookup
+  onOpenStockLookup,
+  onProceedToSplice
 }: PreNestingStockViewProps) => {
   // Mode switcher: 'theoretical' (Step 1: Pure project demand) vs 'reconciliation' (Step 2: Compare with warehouse stock)
   const [analysisMode, setAnalysisMode] = useState<'theoretical' | 'reconciliation'>('theoretical');
@@ -71,8 +73,14 @@ export const PreNestingStockView = ({
   const totalTheoreticalLengthMetersAll = groups.reduce((s, g) => s + g.totalLengthMm / 1000, 0);
   const totalTheoreticalWeightKgAll = groups.reduce((s, g) => s + g.totalWeightKg, 0);
 
-  const avgTheoreticalEfficiency = groups.length > 0
-    ? Number((groups.reduce((s, g) => s + (g.pureTheoreticalNestingResult?.overallEfficiencyPercentage || 0), 0) / groups.length).toFixed(1))
+  // Ponderado por material realmente usado (metros brutos), no un promedio
+  // simple entre perfiles — un perfil con una sola pieza no debe pesar lo
+  // mismo que uno con cientos a la hora de mostrar el aprovechamiento
+  // global del proyecto.
+  const totalRawMaterialAll = groups.reduce((s, g) => s + (g.pureTheoreticalNestingResult?.totalRawMaterialLengthMm || 0), 0);
+  const totalUsefulCutAll = groups.reduce((s, g) => s + (g.pureTheoreticalNestingResult?.totalUsefulCutsLengthMm || 0), 0);
+  const avgTheoreticalEfficiency = totalRawMaterialAll > 0
+    ? Number(((totalUsefulCutAll / totalRawMaterialAll) * 100).toFixed(1))
     : 0;
 
   // Global calculations for Warehouse Reconciliation (Step 2)
@@ -174,7 +182,7 @@ export const PreNestingStockView = ({
             <button
               onClick={() => exportCubicacionSummaryToExcel(groups, inventory)}
               className="px-3.5 py-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-800 font-bold text-xs sm:text-sm border border-blue-300 flex items-center gap-2 transition-colors"
-              title="Exportar tabla resumen del proyecto a Excel (requerimiento total, stock en bodega y resumen de compra)"
+              title="Exportar a Excel: requerimiento total, detalle barra por barra para cotejar, stock en bodega y resumen de compra"
             >
               <FileSpreadsheet className="w-4 h-4 text-blue-700" />
               <span className="hidden sm:inline">Exportar Resumen</span>
@@ -485,6 +493,23 @@ export const PreNestingStockView = ({
                       </>
                     )}
                   </div>
+
+                  {/* Piezas que no entran ni en una barra estándar ni en un
+                      empalme simple: necesitan empalme múltiple (Paso 2) y
+                      quedan FUERA de "barras necesarias"/"aprovechamiento"
+                      de arriba — sin este aviso, ese material desaparece
+                      del cálculo sin que se note. */}
+                  {(() => {
+                    const missing = group.pureTheoreticalNestingResult?.missingPieces || [];
+                    if (missing.length === 0) return null;
+                    const missingQty = missing.reduce((s, p) => s + p.quantity, 0);
+                    return (
+                      <div className="mt-2 pt-2 border-t border-amber-200 flex items-center gap-1.5 text-[11px] text-amber-700 font-semibold">
+                        <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                        <span>{missingQty} pieza(s) muy largas quedan fuera (necesitan empalme múltiple, Paso 2)</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })}
@@ -617,6 +642,42 @@ export const PreNestingStockView = ({
                         <span>Se toman de bodega: <strong>{activeGroup.stockComparison.barsFromStock} barras</strong></span>
                         <span>•</span>
                         <span>Retazos aprovechados: <strong>{activeGroup.stockComparison.offcutsFromStock}</strong></span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Piezas que ni una barra grande ni un empalme simple pueden
+                  resolver — quedan afuera del cálculo de arriba (barras
+                  necesarias / aprovechamiento) hasta que se dividan a mano
+                  en "2. Ajustar Medidas & Empalmes". Sin este aviso, ese
+                  material no aparece en ningún número visible. */}
+              {activeNestingResult && activeNestingResult.missingPieces.length > 0 && (
+                <div className="p-4 rounded-xl border bg-rose-50/80 border-rose-200 text-rose-900">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0 mt-0.5" />
+                    <div className="space-y-1 flex-1">
+                      <div className="font-extrabold text-sm">
+                        ⚠️ {activeNestingResult.missingPieces.reduce((s, p) => s + p.quantity, 0)} pieza(s) NO incluidas arriba — necesitan empalme múltiple
+                      </div>
+                      <p className="text-xs leading-relaxed opacity-90">
+                        Son más largas que lo que cubre un largo comercial + un solo empalme. No están en "Barras Necesarias" ni en el % de Aprovechamiento de este perfil — resuélvelas en{' '}
+                        {onProceedToSplice ? (
+                          <button onClick={onProceedToSplice} className="underline font-bold hover:text-rose-700">
+                            "2. Ajustar Medidas &amp; Empalmes"
+                          </button>
+                        ) : (
+                          <strong>"2. Ajustar Medidas &amp; Empalmes"</strong>
+                        )}{' '}
+                        antes de dar por cerrada la compra de este perfil.
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 pt-1">
+                        {activeNestingResult.missingPieces.map((p) => (
+                          <span key={p.id} className="bg-rose-100 border border-rose-300 text-rose-900 text-[11px] font-mono px-2 py-0.5 rounded-lg">
+                            {p.label}: {p.quantity}× {p.lengthMm.toLocaleString('es-CL')}mm
+                          </span>
+                        ))}
                       </div>
                     </div>
                   </div>

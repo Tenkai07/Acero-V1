@@ -55,7 +55,9 @@ export function CubicacionModule() {
     minUsableOffcutMm: 1000,
     prioritizeOffcuts: true,
     allowMultipleStandardLengths: true,
-    spliceFacingLossMm: 90
+    // Solo aplica a perfiles que NO sean ángulo (los ángulos siempre usan
+    // 90mm internamente, ver getSpliceFacingLossMm en commercialLengths.ts)
+    spliceFacingLossMm: 5
   });
 
   const [showStockLookupModal, setShowStockLookupModal] = useState(false);
@@ -283,6 +285,7 @@ export function CubicacionModule() {
             onOpenOperatorGuide={(result, material) => setOperatorGuideData({ result, material })}
             onOpenSaveModal={() => setShowSaveProjectModal(true)}
             onOpenStockLookup={() => setShowStockLookupModal(true)}
+            onProceedToSplice={() => setActiveTab("empalmes")}
           />
         )}
 

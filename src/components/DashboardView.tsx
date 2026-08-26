@@ -167,15 +167,20 @@ export const DashboardView = () => {
     () => activosBomProjects.reduce((s, p) => s + (p.totalBarsToBuy || 0), 0),
     [activosBomProjects]
   );
+  // Ponderado por material bruto real consumido (no un promedio simple de
+  // % entre proyectos/perfiles, y sin asumir un único largo de barra para
+  // todo el proyecto — distintos perfiles, e incluso distintas barras del
+  // mismo perfil, pueden ser de largos comerciales distintos).
   const avgAprovechamiento = useMemo(() => {
-    const withData = bomProjects.filter((p) => p.totalBarsTheoretical > 0);
-    if (withData.length === 0) return 0;
-    const sum = withData.reduce((s, p) => {
-      const netMeters = p.groups.reduce((gs, g) => gs + g.totalLengthMm, 0) / 1000;
-      const grossMeters = (p.totalBarsTheoretical * (p.groups[0]?.commercialBarLengthMm || 6000)) / 1000;
-      return s + (grossMeters > 0 ? (netMeters / grossMeters) * 100 : 0);
-    }, 0);
-    return sum / withData.length;
+    let totalRaw = 0;
+    let totalUseful = 0;
+    bomProjects.forEach((p) => {
+      p.groups.forEach((g) => {
+        totalRaw += g.pureTheoreticalNestingResult?.totalRawMaterialLengthMm || 0;
+        totalUseful += g.pureTheoreticalNestingResult?.totalUsefulCutsLengthMm || 0;
+      });
+    });
+    return totalRaw > 0 ? (totalUseful / totalRaw) * 100 : 0;
   }, [bomProjects]);
   const deficitPorPerfil = useMemo(() => {
     const map = new Map<string, number>();

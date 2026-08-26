@@ -10,6 +10,7 @@ import {
 import { COLOR_PALETTE } from '../data/initialStock';
 import { getAvailableBarsCount, getAvailableOffcuts } from './stockReservations';
 import { evaluateOversizedPieceOptions } from './oversizedPieceOptions';
+import { getSpliceFacingLossMm } from './commercialLengths';
 
 interface FlatPiece {
   originalId: string;
@@ -17,6 +18,13 @@ interface FlatPiece {
   lengthMm: number;
   color: string;
   instanceIndex: number;
+  // Tramo corto de empalme (no una pieza real del proyecto) — varios
+  // tramos, de piezas distintas, SÍ pueden compartir una misma barra nueva
+  // (ej. el sobrante de cortar el tramo de una pieza se reutiliza para el
+  // tramo de la siguiente). Lo que nunca ocurre es que una misma PIEZA
+  // final lleve dos tramos de empalme, pero eso ya está garantizado porque
+  // cada pieza oversized genera un único filler.
+  isSpliceFiller?: boolean;
 }
 
 interface StockSourceOption {
@@ -31,7 +39,8 @@ interface StockSourceOption {
 export function run1DNestingOptimization(
   material: MaterialStockItem,
   piecesRequest: CuttingPieceRequest[],
-  settings: OptimizationSettings
+  settings: OptimizationSettings,
+  candidateBarLengthsMm?: number[]
 ): OptimizationResult {
   const {
     kerfMm = 3,
@@ -65,9 +74,13 @@ export function run1DNestingOptimization(
     return createEmptyResult();
   }
 
-  // Check for pieces that exceed the longest possible bar (standard bar length or longest offcut)
+  // Check for pieces that exceed the longest possible bar (standard bar
+  // length, longest offcut, o el mayor largo candidato pasado explícitamente
+  // — sin esto, una pieza de 8m se marcaba "imposible" solo por mirar el
+  // largo estándar de 6m, aunque se le hubiera pasado 12m como candidato).
   const maxPossibleLength = Math.max(
     material.standardBarLengthMm,
+    ...(candidateBarLengthsMm || []),
     ...material.offcuts.map((o) => o.lengthMm)
   );
 
@@ -102,6 +115,11 @@ export function run1DNestingOptimization(
   const oversizedBarPlans: CutBarPlan[] = [];
   const consumedOffcutIdsForSplice = new Set<string>();
   const stillImpossible: FlatPiece[] = [];
+  // Tramos cortos de empalme que necesitan barra nueva (sin retazo que les
+  // alcance) — se anidan junto con el resto de las piezas normales en vez
+  // de comprarles una barra dedicada cada uno, para que varios tramos
+  // cortos puedan compartir una misma barra nueva si caben juntos.
+  const spliceFillerPieces: FlatPiece[] = [];
 
   if (settings.allowMultipleStandardLengths && impossiblePieces.length > 0) {
     const byLength = new Map<number, FlatPiece[]>();
@@ -183,42 +201,61 @@ export function run1DNestingOptimization(
             efficiencyPercentage: 100
           });
 
+          // El tramo corto adicional NO se resuelve aquí con una barra
+          // dedicada — se le sigue prefiriendo un retazo existente si
+          // alcanza (chosen.extraSegmentSource==='offcut', ya decidido por
+          // evaluateOversizedPieceOptions), pero si hace falta una barra
+          // nueva, ese tramo se suma al pool general de piezas a anidar
+          // (spliceFillerPieces) en vez de comprarle una barra propia. Así,
+          // varios tramos cortos de empalmes distintos (del mismo perfil)
+          // pueden terminar compartiendo UNA sola barra nueva si caben
+          // juntos, en vez de una barra nueva por cada empalme.
           const usedOffcut =
             chosen.extraSegmentSource === 'offcut'
               ? material.offcuts.find((o) => o.id === chosen.extraSegmentOffcutId)
               : undefined;
-          if (usedOffcut) consumedOffcutIdsForSplice.add(usedOffcut.id);
 
-          const extraSourceLengthMm = usedOffcut ? usedOffcut.lengthMm : chosen.barLengthUsedMm;
           const extraCutLengthMm = chosen.extraSegmentLengthMm || 0;
-          const extraRemainingMm = Math.max(0, extraSourceLengthMm - extraCutLengthMm);
+          const effectiveSpliceLossMm = getSpliceFacingLossMm(material.code, material.category, settings.spliceFacingLossMm ?? 5);
+          const fillerLabel = `${piece.label} (tramo adicional empalme, incl. ${effectiveSpliceLossMm}mm de saneo)`;
 
-          oversizedBarPlans.push({
-            id: `bar-plan-oversized-${oversizedBarPlans.length + 1}`,
-            barIndex: 0,
-            sourceType: usedOffcut ? 'stock_offcut' : 'new_purchased_bar',
-            sourceLengthMm: extraSourceLengthMm,
-            sourceOffcutId: usedOffcut?.id,
-            sourceLocation: usedOffcut
-              ? 'Empalme — tramo adicional (retazo de bodega)'
-              : 'Empalme — tramo adicional (barra nueva)',
-            cuts: [
-              {
-                pieceId: pieceKey,
-                label: `${piece.label} (tramo adicional, incl. ${settings.spliceFacingLossMm ?? 90}mm de saneo de empalme)`,
-                lengthMm: extraCutLengthMm,
-                color: piece.color,
-                cutIndex: 1,
-                stopPositionMm: extraCutLengthMm
-              }
-            ],
-            totalCutLengthMm: extraCutLengthMm,
-            kerfTotalMm: 0,
-            trimCutMm: 0,
-            remainingMm: extraRemainingMm,
-            isReusableOffcut: extraRemainingMm >= minUsableOffcutMm,
-            efficiencyPercentage: Number(((extraCutLengthMm / extraSourceLengthMm) * 100).toFixed(2))
-          });
+          if (usedOffcut) {
+            consumedOffcutIdsForSplice.add(usedOffcut.id);
+            const extraRemainingMm = Math.max(0, usedOffcut.lengthMm - extraCutLengthMm);
+            oversizedBarPlans.push({
+              id: `bar-plan-oversized-${oversizedBarPlans.length + 1}`,
+              barIndex: 0,
+              sourceType: 'stock_offcut',
+              sourceLengthMm: usedOffcut.lengthMm,
+              sourceOffcutId: usedOffcut.id,
+              sourceLocation: 'Empalme — tramo adicional (retazo de bodega)',
+              cuts: [
+                {
+                  pieceId: pieceKey,
+                  label: fillerLabel,
+                  lengthMm: extraCutLengthMm,
+                  color: piece.color,
+                  cutIndex: 1,
+                  stopPositionMm: extraCutLengthMm
+                }
+              ],
+              totalCutLengthMm: extraCutLengthMm,
+              kerfTotalMm: 0,
+              trimCutMm: 0,
+              remainingMm: extraRemainingMm,
+              isReusableOffcut: extraRemainingMm >= minUsableOffcutMm,
+              efficiencyPercentage: Number(((extraCutLengthMm / usedOffcut.lengthMm) * 100).toFixed(2))
+            });
+          } else {
+            spliceFillerPieces.push({
+              originalId: `${piece.originalId}-empalme`,
+              label: fillerLabel,
+              lengthMm: extraCutLengthMm,
+              color: piece.color,
+              instanceIndex: piece.instanceIndex,
+              isSpliceFiller: true
+            });
+          }
         }
       });
     });
@@ -229,6 +266,16 @@ export function run1DNestingOptimization(
   oversizedBarPlans.forEach((p, idx) => {
     p.barIndex = idx + 1;
   });
+
+  // Los tramos cortos de empalme se suman al pool general de piezas a
+  // anidar (re-ordenando descendente para que el heurístico BFD los trate
+  // igual que a cualquier otra pieza corta) — de ahí en adelante compiten
+  // por retazos y barras nuevas junto con el resto, en vez de tener
+  // reservada una barra propia cada uno.
+  if (spliceFillerPieces.length > 0) {
+    validPieces.push(...spliceFillerPieces);
+    validPieces.sort((a, b) => b.lengthMm - a.lengthMm);
+  }
 
   // 2. Prepare stock inventory pool
   const stockPool: StockSourceOption[] = [];
@@ -319,26 +366,42 @@ export function run1DNestingOptimization(
     }
   }
 
-  // 5. Phase C: If pieces remain, use additional new purchased bars (unlimited virtual supply)
-  while (unassignedPieces.length > 0) {
-    const newBar: StockSourceOption = {
-      id: `new-bar-${barCounter}`,
-      type: 'new_purchased_bar',
-      lengthMm: material.standardBarLengthMm,
-      location: 'Por Comprar / Solicitar',
-      used: true
-    };
+  // 5. Phase C: If pieces remain, use additional new purchased bars (unlimited
+  // virtual supply). Si hay más de un largo comercial candidato (ej. 6m y
+  // 12m para un tubular RHS), se prueba CADA barra nueva con todos los
+  // largos disponibles y se elige el que da mejor aprovechamiento para las
+  // piezas que quedan EN ESE MOMENTO — no un largo único fijo para todo el
+  // lote, porque el mix ideal de 6m/12m suele variar a medida que se van
+  // consumiendo piezas de distintos tamaños.
+  const lengthsToTry =
+    candidateBarLengthsMm && candidateBarLengthsMm.length > 0 ? candidateBarLengthsMm : [material.standardBarLengthMm];
 
-    const plan = tryPackBar(newBar, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter);
-    if (!plan || plan.cuts.length === 0) {
-      // Piece cannot fit even in a full bar
+  while (unassignedPieces.length > 0) {
+    let bestPlan: CutBarPlan | null = null;
+
+    for (const len of lengthsToTry) {
+      const trialBar: StockSourceOption = {
+        id: `new-bar-${barCounter}`,
+        type: 'new_purchased_bar',
+        lengthMm: len,
+        location: 'Por Comprar / Solicitar',
+        used: true
+      };
+      const trialPlan = tryPackBar(trialBar, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter);
+      if (trialPlan && trialPlan.cuts.length > 0 && (!bestPlan || trialPlan.efficiencyPercentage > bestPlan.efficiencyPercentage)) {
+        bestPlan = trialPlan;
+      }
+    }
+
+    if (!bestPlan) {
+      // Ninguna barra, de ningún largo candidato, pudo llevarse ni una pieza
       break;
     }
 
-    barPlans.push(plan);
+    barPlans.push(bestPlan);
     barCounter++;
 
-    const packedIds = new Set(plan.cuts.map((c) => c.pieceId));
+    const packedIds = new Set(bestPlan.cuts.map((c) => c.pieceId));
     let i = unassignedPieces.length;
     while (i--) {
       const pieceKey = `${unassignedPieces[i].originalId}_${unassignedPieces[i].instanceIndex}`;
@@ -457,20 +520,66 @@ function tryPackBar(
     return null;
   }
 
-  // Find best combination of pieces that fits in usableCapacity
-  // Heuristic: First-Fit Decreasing with multi-element branch lookahead
-  const selectedPieces: FlatPiece[] = [];
-  let currentUsed = 0; // does not include trimCutMm
+  // Find best combination of pieces that fits in usableCapacity.
+  //
+  // Heurística: "First-Fit Decreasing" puro (probar los largos en un único
+  // orden fijo, de mayor a menor) deja bastante desperdicio sobre la mesa —
+  // a veces empezar la barra con una pieza más chica permite que el resto
+  // encaje mejor. Para acercarse más al óptimo sin pagar el costo de un
+  // knapsack exacto (inviable en tiempo real con miles de piezas), se
+  // prueba UN ANCLA por cada largo distinto disponible: "empezar esta
+  // barra con este largo, y rellenar el resto greedy de mayor a menor" — y
+  // se elige el ancla que más aprovecha la barra. Sigue siendo una
+  // heurística, no un óptimo garantizado, pero mejora notoriamente sobre
+  // una sola pasada fija.
+  //
+  // Nota sobre empalmes: una barra nueva comprada para tramos cortos de
+  // empalme SÍ puede cortarse en varios tramos, cada uno yendo a una pieza
+  // final distinta (ej. sobran 3m al cortar el tramo de una pieza — ese
+  // sobrante se reutiliza como tramo de empalme de la SIGUIENTE pieza). La
+  // restricción real es otra: CADA PIEZA FABRICADA lleva como máximo un
+  // empalme (nunca dos tramos cortos en la misma pieza terminada) — eso ya
+  // se cumple solo, porque cada pieza oversized genera un único
+  // `spliceFillerPieces` en la sección 1.5, nunca dos.
+  const fillGreedyFrom = (anchorIdx: number): { selected: FlatPiece[]; used: number } => {
+    const selected: FlatPiece[] = [];
+    let used = 0;
 
-  for (let i = 0; i < availablePieces.length; i++) {
-    const p = availablePieces[i];
-    const neededWithKerf = selectedPieces.length === 0 ? p.lengthMm : p.lengthMm + kerfMm;
+    const anchor = availablePieces[anchorIdx];
+    if (anchor.lengthMm > usableCapacity) return { selected, used };
+    selected.push(anchor);
+    used = anchor.lengthMm;
 
-    if (currentUsed + neededWithKerf <= usableCapacity) {
-      selectedPieces.push(p);
-      currentUsed += neededWithKerf;
+    for (let i = 0; i < availablePieces.length; i++) {
+      if (i === anchorIdx) continue;
+      const p = availablePieces[i];
+      const neededWithKerf = p.lengthMm + kerfMm;
+      if (used + neededWithKerf <= usableCapacity) {
+        selected.push(p);
+        used += neededWithKerf;
+      }
     }
+    return { selected, used };
+  };
+
+  let bestFill = fillGreedyFrom(0);
+  const triedLengths = new Set<number>([availablePieces[0]?.lengthMm]);
+  // Ancla en cada largo DISTINTO (no cada instancia — probar 50 anclas
+  // idénticas de 6000mm no aporta nada más que la primera) para acotar el
+  // costo cuando hay cientos de piezas del mismo largo.
+  for (let i = 1; i < availablePieces.length; i++) {
+    const len = availablePieces[i].lengthMm;
+    if (triedLengths.has(len)) continue;
+    triedLengths.add(len);
+    const candidate = fillGreedyFrom(i);
+    if (candidate.used > bestFill.used) bestFill = candidate;
   }
+
+  const selectedPieces = bestFill.selected;
+  // Reordenar de mayor a menor para que la secuencia de corte en pantalla
+  // (y los topes de sierra acumulados) sigan un orden intuitivo para el
+  // operador, sin importar qué ancla ganó internamente.
+  selectedPieces.sort((a, b) => b.lengthMm - a.lengthMm);
 
   if (selectedPieces.length === 0) {
     return null;
