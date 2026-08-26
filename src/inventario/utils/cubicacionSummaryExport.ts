@@ -31,6 +31,13 @@ function formatSheet(ws: XLSX.WorkSheet, colWidths: number[], rowCount: number) 
  */
 function clasificarEmpalme(sourceLocation: string | undefined, cutLabel: string): { tipo: string; rol: string } {
   const combined = `${sourceLocation || ''} ${cutLabel}`;
+  // Estrategia "tira empalmada": se sueldan dos barras del mismo largo
+  // ANTES de cortar. Solo la pieza que queda sobre la unión lleva
+  // soldadura; las demás piezas de esa tira salen enteras y son directas,
+  // aunque su barra de origen diga "Tira empalmada".
+  if (cutLabel.includes('empalmada sobre la unión')) {
+    return { tipo: 'Empalme en Tira (2 barras pre-soldadas)', rol: 'Pieza sobre la unión' };
+  }
   if (combined.includes('tramo principal')) {
     return { tipo: combined.includes('por ahorro') ? 'Empalme por Ahorro' : 'Empalme Necesario', rol: 'Tramo Principal' };
   }
@@ -83,9 +90,14 @@ export function exportCubicacionSummaryToExcel(
     // igual) sin tener que abrir la hoja de detalle.
     let empalmesNecesarios = 0;
     let empalmesPorAhorro = 0;
+    let empalmesEnTira = 0;
     result?.barPlans.forEach((plan) => {
       plan.cuts.forEach((cut) => {
         const { tipo, rol } = clasificarEmpalme(plan.sourceLocation, cut.label);
+        if (rol === 'Pieza sobre la unión') {
+          empalmesEnTira++;
+          return;
+        }
         if (rol !== 'Tramo Principal') return;
         if (tipo === 'Empalme Necesario') empalmesNecesarios++;
         else if (tipo === 'Empalme por Ahorro') empalmesPorAhorro++;
@@ -101,6 +113,7 @@ export function exportCubicacionSummaryToExcel(
       'Piezas Pendientes (Empalme Múltiple)': piezasPendientes,
       'Empalmes Necesarios': empalmesNecesarios,
       'Empalmes por Ahorro': empalmesPorAhorro,
+      'Empalmes en Tira (2 barras pre-soldadas)': empalmesEnTira,
       'Metros Lineales Netos (Totales)': Number((g.totalLengthMm / 1000).toFixed(2)),
       'Metros Pendientes (Empalme Múltiple)': Number(metrosPendientes.toFixed(2)),
       'Peso Total (kg)': Number(g.totalWeightKg.toFixed(2)),
@@ -124,6 +137,10 @@ export function exportCubicacionSummaryToExcel(
     'Piezas Pendientes (Empalme Múltiple)': requerimientoRows.reduce((s, r) => s + r['Piezas Pendientes (Empalme Múltiple)'], 0),
     'Empalmes Necesarios': requerimientoRows.reduce((s, r) => s + (r['Empalmes Necesarios'] as number), 0),
     'Empalmes por Ahorro': requerimientoRows.reduce((s, r) => s + (r['Empalmes por Ahorro'] as number), 0),
+    'Empalmes en Tira (2 barras pre-soldadas)': requerimientoRows.reduce(
+      (s, r) => s + (r['Empalmes en Tira (2 barras pre-soldadas)'] as number),
+      0
+    ),
     'Metros Lineales Netos (Totales)': Number(totalMetrosReq.toFixed(2)),
     'Metros Pendientes (Empalme Múltiple)': Number(totalMetrosPendientesReq.toFixed(2)),
     'Peso Total (kg)': Number(totalPesoReq.toFixed(2)),
@@ -135,7 +152,7 @@ export function exportCubicacionSummaryToExcel(
   });
 
   const wsRequerimiento = XLSX.utils.json_to_sheet(requerimientoRows);
-  formatSheet(wsRequerimiento, [16, 10, 14, 12, 13, 22, 16, 16, 18, 22, 13, 18, 20], requerimientoRows.length);
+  formatSheet(wsRequerimiento, [16, 10, 14, 12, 13, 22, 16, 16, 26, 18, 22, 13, 18, 20], requerimientoRows.length);
   XLSX.utils.book_append_sheet(workbook, wsRequerimiento, 'Requerimiento Total');
 
   // -------------------------------------------------------------------

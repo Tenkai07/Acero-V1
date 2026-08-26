@@ -6,6 +6,7 @@ import {
   CuttingPieceRequest
 } from '../types';
 import { run1DNestingOptimization } from './nesting1D';
+import { runSplicedStripNesting } from './splicedBarStrategy';
 import { COLOR_PALETTE } from '../data/initialStock';
 import { getReservedBarsCount, getReservedOffcuts } from './stockReservations';
 import { inferAlternateBarLengths } from './commercialLengths';
@@ -196,6 +197,27 @@ export function runProjectPreNesting(
         pureTheoreticalLen = len;
       }
     }
+
+    // Estrategia "tira empalmada": soldar DE ANTEMANO dos barras del mismo
+    // largo comercial y cortar la tira completa (ej. 12m+12m=24m). Cuando
+    // las piezas son "medianas" (dos no caben en una barra pero tres sí
+    // caben en dos barras soldadas), esto reduce muchísimo el desperdicio
+    // frente a cortar barra por barra. Se evalúa como una alternativa más
+    // y solo gana si compra MENOS material sin dejar más piezas pendientes.
+    if (settings.allowMultipleStandardLengths) {
+      for (const len of candidateLengths) {
+        const stripResult = runSplicedStripNesting(pureTheoreticalMaterial, pieceRequests, theoreticalSettings, len);
+        if (!stripResult) continue;
+        if (
+          stripResult.missingPieces.length < pureTheoreticalNestingResult.missingPieces.length ||
+          (stripResult.missingPieces.length === pureTheoreticalNestingResult.missingPieces.length &&
+            stripResult.totalRawMaterialLengthMm < pureTheoreticalNestingResult.totalRawMaterialLengthMm)
+        ) {
+          pureTheoreticalNestingResult = stripResult;
+          pureTheoreticalLen = len;
+        }
+      }
+    }
     // El largo "predominante" real (para mostrar en pantalla/Excel) es el
     // más usado entre las barras nuevas del resultado ganador — nunca
     // simplemente el primer candidato de la lista, que no necesariamente
@@ -205,8 +227,13 @@ export function runProjectPreNesting(
     pureTheoreticalNestingResult.barPlans
       .filter((p) => p.sourceType === 'new_purchased_bar')
       .forEach((p) => newBarLengthCounts.set(p.sourceLengthMm, (newBarLengthCounts.get(p.sourceLengthMm) || 0) + 1));
+    // Si ganó la estrategia de tira empalmada, los `sourceLengthMm` de sus
+    // planes son el largo de la TIRA (ej. 24m), no el de la barra que se
+    // compra (12m) — el largo comercial a mostrar/cotizar es el simple.
     const bestLength =
-      [...newBarLengthCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || candidateLengths[0];
+      pureTheoreticalNestingResult.splicedStripsCount !== undefined
+        ? pureTheoreticalLen
+        : [...newBarLengthCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || candidateLengths[0];
 
     // 2. STOCK-OPTIMIZED 1D NESTING (Consumes warehouse offcuts and stock bars first)
     const effectiveMaterial: MaterialStockItem = matchedMat
@@ -253,6 +280,26 @@ export function runProjectPreNesting(
       }
     }
 
+    // Misma alternativa de "tira empalmada" que en el cálculo teórico. Ojo:
+    // la tira se arma solo con barras NUEVAS (el stock de bodega está a
+    // largo simple), así que esta variante renuncia a consumir bodega — por
+    // eso se compara contra cuánto material NUEVO compra cada alternativa,
+    // que es justo lo que cambia entre ellas.
+    if (settings.allowMultipleStandardLengths) {
+      for (const len of candidateLengths) {
+        const stripRes = runSplicedStripNesting(effectiveMaterial, pieceRequests, settings, len);
+        if (!stripRes) continue;
+        if (
+          stripRes.missingPieces.length < nestingRes.missingPieces.length ||
+          (stripRes.missingPieces.length === nestingRes.missingPieces.length &&
+            newBoughtLengthMm(stripRes) < newBoughtLengthMm(nestingRes))
+        ) {
+          nestingRes = stripRes;
+          nestingResLen = len;
+        }
+      }
+    }
+
     // Stock check
     const stockBarsAvail = effectiveMaterial.standardBarsCount;
     const stockOffcutsAvail = effectiveMaterial.offcuts.length;
@@ -269,7 +316,16 @@ export function runProjectPreNesting(
     const weightToBuyKg = Number((metersToBuy * effectiveMaterial.theoreticalWeightPerMeter).toFixed(2));
     const costToBuy = Math.round(metersToBuy * effectiveMaterial.costPerMeter);
     const buyBreakdownByLength = new Map<number, number>();
-    newBarPlans.forEach((p) => buyBreakdownByLength.set(p.sourceLengthMm, (buyBreakdownByLength.get(p.sourceLengthMm) || 0) + 1));
+    newBarPlans.forEach((p) => {
+      // En la estrategia de tira empalmada cada "plan" es una tira de 2
+      // barras (ej. 24m): se cotiza y se compra el largo SIMPLE (12m), dos
+      // por tira — mostrar "41 de 24m" sería pedirle al proveedor un largo
+      // que no fabrica.
+      const isStrip = nestingRes.splicedStripsCount !== undefined;
+      const purchasedLen = isStrip ? p.sourceLengthMm / 2 : p.sourceLengthMm;
+      const purchasedQty = isStrip ? 2 : 1;
+      buyBreakdownByLength.set(purchasedLen, (buyBreakdownByLength.get(purchasedLen) || 0) + purchasedQty);
+    });
     const buyBreakdownLabel = Array.from(buyBreakdownByLength.entries())
       .sort((a, b) => b[0] - a[0])
       .map(([len, count]) => `${count} de ${(len / 1000).toLocaleString('es-CL')}m`)

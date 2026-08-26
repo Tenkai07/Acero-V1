@@ -181,6 +181,11 @@ export interface OptimizationResult {
   // alternativa "barra comercial más grande" vs. "empalme" (solo si
   // settings.allowMultipleStandardLengths está activo).
   oversizedPieceComparisons?: OversizedPieceComparison[];
+  // Cantidad de "tiras empalmadas" (dos barras del mismo largo comercial
+  // soldadas ANTES de cortar, ej. 12m+12m=24m) que llevan efectivamente una
+  // pieza sobre la unión. Solo lo llena `runSplicedStripNesting`; ausente
+  // cuando se cortó barra por barra sin pre-soldar.
+  splicedStripsCount?: number;
 }
 
 export interface RealtimeStockCheck {
