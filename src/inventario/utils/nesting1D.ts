@@ -388,7 +388,20 @@ export function run1DNestingOptimization(
         used: true
       };
       const trialPlan = tryPackBar(trialBar, unassignedPieces, kerfMm, trimCutMm, minUsableOffcutMm, barCounter);
-      if (trialPlan && trialPlan.cuts.length > 0 && (!bestPlan || trialPlan.efficiencyPercentage > bestPlan.efficiencyPercentage)) {
+      // A igual eficiencia (empate exacto, típico cuando un largo es
+      // múltiplo entero de otro — ej. 2 piezas de 4290mm en una barra de
+      // 12m da la MISMA eficiencia que 1 pieza de 4290mm en una de 6m,
+      // porque 12000 = 2×6000), se prefiere la barra más GRANDE: mismo
+      // material total consumido, pero la mitad de barras físicas que
+      // manipular/soldar. Sin este desempate, el orden de `lengthsToTry`
+      // decidía arbitrariamente y normalmente ganaba el largo más chico.
+      if (
+        trialPlan &&
+        trialPlan.cuts.length > 0 &&
+        (!bestPlan ||
+          trialPlan.efficiencyPercentage > bestPlan.efficiencyPercentage ||
+          (trialPlan.efficiencyPercentage === bestPlan.efficiencyPercentage && trialPlan.sourceLengthMm > bestPlan.sourceLengthMm))
+      ) {
         bestPlan = trialPlan;
       }
     }
@@ -509,7 +522,15 @@ export function run1DNestingOptimization(
             used: true
           };
           const trialPlan = tryPackBar(trialBar, fillerSim, kerfMm, trimCutMm, minUsableOffcutMm, simCounter);
-          if (trialPlan && trialPlan.cuts.length > 0 && (!bestPlan || trialPlan.efficiencyPercentage > bestPlan.efficiencyPercentage)) {
+          // Mismo desempate que en la Fase C: a igual eficiencia, preferir
+          // la barra más grande (menos barras físicas por el mismo material).
+          if (
+            trialPlan &&
+            trialPlan.cuts.length > 0 &&
+            (!bestPlan ||
+              trialPlan.efficiencyPercentage > bestPlan.efficiencyPercentage ||
+              (trialPlan.efficiencyPercentage === bestPlan.efficiencyPercentage && trialPlan.sourceLengthMm > bestPlan.sourceLengthMm))
+          ) {
             bestPlan = trialPlan;
           }
         }
