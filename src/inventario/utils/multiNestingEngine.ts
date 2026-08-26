@@ -163,44 +163,37 @@ export function runProjectPreNesting(
       alternateBarLengthsMm: alternateLengths.length > 0 ? alternateLengths : undefined
     };
 
-    // 1. PURE THEORETICAL 1D NESTING (100% new bars, 0 stock) — se prueban
-    // dos estrategias y se elige la que consuma menos material bruto total:
-    // (a) "mixta", eligiendo el mejor largo barra por barra sobre la marcha,
-    // y (b) "fija al largo más grande", comprando solo del largo comercial
-    // mayor disponible (ej. 12m). La mixta suele ganar, pero no siempre — a
-    // veces comprometerse al largo más grande evita remanentes chicos que
-    // la elección local, barra a barra, no ve venir.
-    //
-    // A propósito NO se prueba "fija a un largo MENOR" (ej. forzar 6m
-    // cuando también hay 12m disponible): eso crearía un escenario
-    // ficticio que obliga a empalmar piezas que en la realidad ya caben
-    // enteras en una barra de 12m real, y ese empalme "gratis" en papel
-    // (pérdida de saneo baja) le ganaría a la barra grande por matemática
-    // pura de desperdicio — aunque el usuario prefiere evitar empalmes
-    // siempre que una barra ya cubra la pieza entera.
+    // 1. PURE THEORETICAL 1D NESTING (100% new bars, 0 stock) — el usuario
+    // confirmó que SIEMPRE se compra de UN SOLO largo comercial por
+    // perfil: es lo que se cotiza con el proveedor (una orden de compra
+    // mezclando 6m y 12m no se puede cotizar limpio). Por eso NUNCA se usa
+    // una corrida "mixta" (varios largos a la vez) como resultado oficial
+    // — se prueba CADA largo candidato como escenario de largo único
+    // completo (empaque normal + cualquier empalme, todo a ese mismo
+    // largo) y se elige el que resuelva más piezas y, entre esos, el que
+    // use menos material bruto total.
     const theoreticalSettings = { ...settings, prioritizeOffcuts: false };
-    const largestCandidateLength = Math.max(...candidateLengths);
     let pureTheoreticalNestingResult = run1DNestingOptimization(
       pureTheoreticalMaterial,
       pieceRequests,
       theoreticalSettings,
-      candidateLengths
+      [candidateLengths[0]]
     );
-    for (const len of [largestCandidateLength]) {
+    let pureTheoreticalLen = candidateLengths[0];
+    for (let i = 1; i < candidateLengths.length; i++) {
+      const len = candidateLengths[i];
       const fixedResult = run1DNestingOptimization(pureTheoreticalMaterial, pieceRequests, theoreticalSettings, [len]);
-      // Nunca preferir una variante que deja MÁS piezas sin cortar que la
-      // mejor encontrada hasta ahora (ej. "solo 6m" cuando hay piezas de
-      // 8m) — su totalRawMaterialLengthMm luce artificialmente bajo por no
-      // haber comprado material para esas piezas, no por ser más eficiente.
-      // Piezas que ninguna variante puede resolver (más largas que
-      // cualquier largo candidato — necesitan empalme múltiple, ver
-      // spliceCalculator.ts) sí quedan igual de "missing" en todas, y ahí
-      // el desempate es netamente por menor material bruto.
+      // A igual material (empate exacto, típico cuando un largo es
+      // múltiplo entero de otro, ej. 12m=2×6m), preferir el largo MAYOR:
+      // mismo material, menos barras físicas que comprar y manipular.
       if (
-        fixedResult.missingPieces.length <= pureTheoreticalNestingResult.missingPieces.length &&
-        fixedResult.totalRawMaterialLengthMm < pureTheoreticalNestingResult.totalRawMaterialLengthMm
+        fixedResult.missingPieces.length < pureTheoreticalNestingResult.missingPieces.length ||
+        (fixedResult.missingPieces.length === pureTheoreticalNestingResult.missingPieces.length &&
+          (fixedResult.totalRawMaterialLengthMm < pureTheoreticalNestingResult.totalRawMaterialLengthMm ||
+            (fixedResult.totalRawMaterialLengthMm === pureTheoreticalNestingResult.totalRawMaterialLengthMm && len > pureTheoreticalLen)))
       ) {
         pureTheoreticalNestingResult = fixedResult;
+        pureTheoreticalLen = len;
       }
     }
     // El largo "predominante" real (para mostrar en pantalla/Excel) es el
@@ -236,22 +229,27 @@ export function runProjectPreNesting(
           alternateBarLengthsMm: alternateLengths.length > 0 ? alternateLengths : undefined
         };
 
-    // Igual que en el cálculo teórico: se prueba la estrategia mixta
-    // (mejor largo barra por barra) y cada largo fijo por separado, y se
-    // elige la que compre MENOS material nuevo en total — el stock
-    // existente en bodega es el mismo en cualquier caso, lo único que
-    // cambia entre variantes es cuánto y de qué largo hay que comprar.
+    // Igual que en el cálculo teórico: se prueba cada largo comercial como
+    // escenario de largo único completo (nunca una mezcla) y se elige el
+    // que compre MENOS material nuevo en total — el stock existente en
+    // bodega es el mismo en cualquier caso, lo único que cambia entre
+    // variantes es cuánto y de qué largo hay que comprar.
     const newBoughtLengthMm = (r: OptimizationResult) =>
       r.barPlans.filter((p) => p.sourceType === 'new_purchased_bar').reduce((s, p) => s + p.sourceLengthMm, 0);
 
-    let nestingRes = run1DNestingOptimization(effectiveMaterial, pieceRequests, settings, candidateLengths);
-    for (const len of [largestCandidateLength]) {
+    let nestingRes = run1DNestingOptimization(effectiveMaterial, pieceRequests, settings, [candidateLengths[0]]);
+    let nestingResLen = candidateLengths[0];
+    for (let i = 1; i < candidateLengths.length; i++) {
+      const len = candidateLengths[i];
       const fixedRes = run1DNestingOptimization(effectiveMaterial, pieceRequests, settings, [len]);
       if (
-        fixedRes.missingPieces.length <= nestingRes.missingPieces.length &&
-        newBoughtLengthMm(fixedRes) < newBoughtLengthMm(nestingRes)
+        fixedRes.missingPieces.length < nestingRes.missingPieces.length ||
+        (fixedRes.missingPieces.length === nestingRes.missingPieces.length &&
+          (newBoughtLengthMm(fixedRes) < newBoughtLengthMm(nestingRes) ||
+            (newBoughtLengthMm(fixedRes) === newBoughtLengthMm(nestingRes) && len > nestingResLen)))
       ) {
         nestingRes = fixedRes;
+        nestingResLen = len;
       }
     }
 

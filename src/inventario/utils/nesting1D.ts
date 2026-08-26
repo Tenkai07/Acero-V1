@@ -84,6 +84,23 @@ export function run1DNestingOptimization(
     ...material.offcuts.map((o) => o.lengthMm)
   );
 
+  // Largos reales que esta corrida en particular tiene permitido usar —
+  // puede ser UN SOLO largo (el usuario pidió cotizar siempre a un largo
+  // único, porque así se cotiza con el proveedor) o varios. Tanto el
+  // empalme "necesario" (sección 1.5) como el "por ahorro" (sección 5.5)
+  // deben respetar ESTE conjunto, no el catálogo completo del material
+  // (`material.alternateBarLengthsMm`) — si no, un empalme podía mezclar
+  // un largo que la corrida actual ni siquiera está evaluando (ej. meter
+  // un tramo de 6m en una corrida "solo 12m"), rompiendo justamente el
+  // escenario de largo único que se está probando.
+  const lengthsToTry =
+    candidateBarLengthsMm && candidateBarLengthsMm.length > 0 ? candidateBarLengthsMm : [material.standardBarLengthMm];
+  const materialForSplice: MaterialStockItem = {
+    ...material,
+    standardBarLengthMm: lengthsToTry[0],
+    alternateBarLengthsMm: lengthsToTry.slice(1)
+  };
+
   const validPieces = piecesToCut.filter(
     (p) => p.lengthMm + trimCutMm <= maxPossibleLength
   );
@@ -131,7 +148,7 @@ export function run1DNestingOptimization(
 
     byLength.forEach((instances, lengthMm) => {
       const firstOffcutSnapshot = getAvailableOffcuts(material).filter((o) => !consumedOffcutIdsForSplice.has(o.id));
-      const comparison = evaluateOversizedPieceOptions(lengthMm, instances.length, material, settings, firstOffcutSnapshot);
+      const comparison = evaluateOversizedPieceOptions(lengthMm, instances.length, materialForSplice, settings, firstOffcutSnapshot);
 
       if (!comparison) {
         stillImpossible.push(...instances);
@@ -141,7 +158,7 @@ export function run1DNestingOptimization(
 
       instances.forEach((piece) => {
         const offcutSnapshot = getAvailableOffcuts(material).filter((o) => !consumedOffcutIdsForSplice.has(o.id));
-        const perInstance = evaluateOversizedPieceOptions(lengthMm, 1, material, settings, offcutSnapshot);
+        const perInstance = evaluateOversizedPieceOptions(lengthMm, 1, materialForSplice, settings, offcutSnapshot);
         if (!perInstance) {
           stillImpossible.push(piece);
           return;
@@ -372,10 +389,16 @@ export function run1DNestingOptimization(
   // largos disponibles y se elige el que da mejor aprovechamiento para las
   // piezas que quedan EN ESE MOMENTO — no un largo único fijo para todo el
   // lote, porque el mix ideal de 6m/12m suele variar a medida que se van
-  // consumiendo piezas de distintos tamaños.
-  const lengthsToTry =
-    candidateBarLengthsMm && candidateBarLengthsMm.length > 0 ? candidateBarLengthsMm : [material.standardBarLengthMm];
+  // consumiendo piezas de distintos tamaños. (`lengthsToTry` ya se definió
+  // arriba, antes de la sección 1.5, para que el empalme también lo respete.)
 
+  // (Se probó reemplazar este bucle por un Best-Fit-Decreasing con varias
+  // barras "abiertas" a la vez para el caso de largo único, esperando que
+  // evitara que las primeras barras acapararan las mejores piezas
+  // complementarias. En la práctica empeoró el resultado en al menos 2
+  // perfiles reales sin mejorar el caso que se quería arreglar — se
+  // revirtió. El ancla única + relleno greedy sigue siendo, empíricamente,
+  // el heurístico más confiable que se ha probado para este caso.)
   while (unassignedPieces.length > 0) {
     let bestPlan: CutBarPlan | null = null;
 
@@ -445,9 +468,12 @@ export function run1DNestingOptimization(
   // que el total original — nunca pieza por pieza. El usuario confirmó
   // priorizar el ahorro de material real por sobre evitar empalmes
   // "innecesarios".
-  const realCandidateLengths = Array.from(
-    new Set([material.standardBarLengthMm, ...(material.alternateBarLengthsMm || [])])
-  );
+  // Igual que en la sección 1.5: usa `lengthsToTry` (los largos que ESTA
+  // corrida tiene permitido usar), no el catálogo completo del material —
+  // si la corrida actual es de largo único (ej. solo 12m, para cotizar),
+  // acá no debe aparecer ningún otro largo, o se rompería justamente el
+  // escenario de largo único que se está probando.
+  const realCandidateLengths = Array.from(new Set(lengthsToTry));
 
   if (realCandidateLengths.length > 1) {
     const smallestRealLength = Math.min(...realCandidateLengths);
@@ -466,10 +492,20 @@ export function run1DNestingOptimization(
       if (plan.cuts.length !== 1) return;
       if (plan.sourceType !== 'new_purchased_bar') return;
       if (plan.sourceLengthMm <= smallestRealLength) return;
-
+      // Excluir cualquier tramo que YA sea parte de un empalme (necesario,
+      // Sección 1.5): ni el tramo principal (placeholder del largo usado,
+      // ej. 12000mm, para una pieza real mucho más larga como 20325mm) ni
+      // un tramo adicional que terminó solo en su propia barra nueva son
+      // piezas completas — son fragmentos de una pieza que YA lleva su
+      // único empalme permitido. Sin este filtro se re-empalmaba el
+      // fragmento como si fuera una pieza normal, dejando la pieza final
+      // con DOS empalmes y contándola como "por ahorro" en vez de
+      // "necesario".
       const cut = plan.cuts[0];
+      if (plan.id.startsWith('bar-plan-oversized-')) return;
+      if (cut.label.includes('tramo principal') || cut.label.includes('tramo adicional')) return;
       const offcutSnapshot = getAvailableOffcuts(material).filter((o) => !consumedOffcutIdsForSplice.has(o.id));
-      const comparison = evaluateOversizedPieceOptions(cut.lengthMm, 1, material, settings, offcutSnapshot);
+      const comparison = evaluateOversizedPieceOptions(cut.lengthMm, 1, materialForSplice, settings, offcutSnapshot);
       const spliceOption = comparison?.options.find((o) => o.type === 'splice');
       if (!spliceOption) return;
 
@@ -739,6 +775,16 @@ function tryPackBar(
   // heurística, no un óptimo garantizado, pero mejora notoriamente sobre
   // una sola pasada fija.
   //
+  // (Se probó además anclar de a PARES de largos distintos, no solo de a
+  // uno, esperando que ayudara cuando muchas piezas medianas compiten por
+  // pocas piezas chicas complementarias. En la práctica empeoró el
+  // resultado total en al menos un perfil real: una mejora LOCAL en una
+  // barra puede dejar peores piezas disponibles para las barras
+  // siguientes — la trampa clásica de un heurístico greedy bar-por-bar.
+  // Se revirtió; cerrar esa brecha de verdad requiere no comprometerse
+  // bar-por-bar, sino optimizar el lote completo o con una pasada de
+  // mejora posterior, no solo mejorar el ancla.)
+  //
   // Nota sobre empalmes: una barra nueva comprada para tramos cortos de
   // empalme SÍ puede cortarse en varios tramos, cada uno yendo a una pieza
   // final distinta (ej. sobran 3m al cortar el tramo de una pieza — ese
@@ -781,17 +827,32 @@ function tryPackBar(
     if (candidate.used > bestFill.used) bestFill = candidate;
   }
 
-  const selectedPieces = bestFill.selected;
+  return buildBarPlan(source, bestFill.selected, kerfMm, trimCutMm, minUsableOffcutMm, barIndex);
+}
+
+/**
+ * Arma el `CutBarPlan` final (cortes con tope acumulado de sierra,
+ * merma/retazo, eficiencia) a partir de un conjunto de piezas YA
+ * seleccionado para una barra — compartido entre `tryPackBar` (que elige
+ * las piezas vía ancla+relleno) y el Best-Fit-Decreasing de la Fase C
+ * (que arma sus propios "bins" de piezas por otro método).
+ */
+function buildBarPlan(
+  source: StockSourceOption,
+  selectedPiecesIn: FlatPiece[],
+  kerfMm: number,
+  trimCutMm: number,
+  minUsableOffcutMm: number,
+  barIndex: number
+): CutBarPlan | null {
+  if (selectedPiecesIn.length === 0) return null;
+  const barLength = source.lengthMm;
+
   // Reordenar de mayor a menor para que la secuencia de corte en pantalla
   // (y los topes de sierra acumulados) sigan un orden intuitivo para el
-  // operador, sin importar qué ancla ganó internamente.
-  selectedPieces.sort((a, b) => b.lengthMm - a.lengthMm);
+  // operador, sin importar en qué orden se hayan elegido las piezas.
+  const selectedPieces = [...selectedPiecesIn].sort((a, b) => b.lengthMm - a.lengthMm);
 
-  if (selectedPieces.length === 0) {
-    return null;
-  }
-
-  // Calculate cut details and cumulative stop positions for operator
   const cuts: CutPieceDetail[] = [];
   let cumulativeMm = trimCutMm;
   let totalCutsLength = 0;
