@@ -278,6 +278,12 @@ export const CncViewer: React.FC<CncViewerProps> = ({ onAddToProject, onSaveToHi
                 {piece.kind === "profile" && " Los agujeros se marcan con anillos naranjos en su posición real; la sección es una aproximación según el tipo de perfil."}
               </p>
             )}
+            {viewMode === "3d" && piece.kind === "profile" && piece.profileFamily === "unknown" && (
+              <p className="text-[11px] text-amber-400 flex items-center gap-1.5">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                No se pudo identificar con certeza el tipo de perfil ("{piece.profileType || "?"}"). Se muestra una barra maciza con las dimensiones reales como aproximación; las cotas y agujeros en 2D sí son exactos.
+              </p>
+            )}
           </div>
 
           {/* Sidebar: piece info */}

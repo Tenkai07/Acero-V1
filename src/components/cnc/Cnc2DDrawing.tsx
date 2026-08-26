@@ -6,11 +6,19 @@ interface Cnc2DDrawingProps {
 }
 
 export const Cnc2DDrawing: React.FC<Cnc2DDrawingProps> = ({ face }) => {
-  const padding = Math.max(face.widthMm, face.heightMm) * 0.25 + 40;
-  const minX = -padding;
-  const minY = -padding;
-  const vbWidth = face.widthMm + padding * 2;
-  const vbHeight = face.heightMm + padding * 2;
+  // Padding independiente por eje: los perfiles estructurales son
+  // habitualmente muchísimo más largos que altos (ej. 2000mm x 50mm). Usar
+  // un solo padding basado en la dimensión mayor (el largo) infla el alto
+  // del viewBox varios cientos de veces por sobre el alto real de la pieza,
+  // dejando la pieza y sus perforaciones reducidas a una línea casi
+  // invisible. Cada eje se acota según su propia extensión.
+  const minDim = Math.min(face.widthMm, face.heightMm) || face.widthMm || 1;
+  const padX = Math.max(face.widthMm * 0.05, minDim * 0.6, 40);
+  const padY = Math.max(face.heightMm * 0.6, minDim * 0.6, 40);
+  const minX = -padX;
+  const minY = -padY;
+  const vbWidth = face.widthMm + padX * 2;
+  const vbHeight = face.heightMm + padY * 2;
 
   // SVG tiene Y creciendo hacia abajo; invertimos para que las cotas se vean
   // como un plano técnico normal (Y creciendo hacia arriba).
@@ -23,8 +31,8 @@ export const Cnc2DDrawing: React.FC<Cnc2DDrawingProps> = ({ face }) => {
 
   const holeAnnotations = generateHoleAnnotations(face);
 
-  const fontSize = Math.max(face.widthMm, face.heightMm) * 0.022;
-  const strokeW = Math.max(face.widthMm, face.heightMm) * 0.0025;
+  const fontSize = Math.max(minDim * 0.09, 6);
+  const strokeW = Math.max(minDim * 0.01, 0.6);
 
   return (
     <svg viewBox={`${minX} ${minY - 30} ${vbWidth} ${vbHeight + 30}`} className="w-full h-full">
@@ -57,23 +65,23 @@ export const Cnc2DDrawing: React.FC<Cnc2DDrawingProps> = ({ face }) => {
       {/* Cotas generales (largo total / alto total) */}
       <g>
         <line
-          x1={0} y1={face.heightMm + padding * 0.35}
-          x2={face.widthMm} y2={face.heightMm + padding * 0.35}
+          x1={0} y1={face.heightMm + padY * 0.35}
+          x2={face.widthMm} y2={face.heightMm + padY * 0.35}
           stroke="#38bdf8" strokeWidth={strokeW} markerStart="url(#dimArrow)" markerEnd="url(#dimArrow)"
         />
-        <text x={face.widthMm / 2} y={face.heightMm + padding * 0.35 - padding * 0.06} fill="#38bdf8" fontSize={fontSize} fontWeight="bold" textAnchor="middle" fontFamily="monospace">
+        <text x={face.widthMm / 2} y={face.heightMm + padY * 0.35 - padY * 0.06} fill="#38bdf8" fontSize={fontSize} fontWeight="bold" textAnchor="middle" fontFamily="monospace">
           {face.widthMm.toLocaleString("es-CL")} mm
         </text>
 
         <line
-          x1={-padding * 0.35} y1={0}
-          x2={-padding * 0.35} y2={face.heightMm}
+          x1={-padX * 0.35} y1={0}
+          x2={-padX * 0.35} y2={face.heightMm}
           stroke="#38bdf8" strokeWidth={strokeW} markerStart="url(#dimArrow)" markerEnd="url(#dimArrow)"
         />
         <text
-          x={-padding * 0.35 - padding * 0.06} y={face.heightMm / 2}
+          x={-padX * 0.35 - padX * 0.06} y={face.heightMm / 2}
           fill="#38bdf8" fontSize={fontSize} fontWeight="bold" textAnchor="middle" fontFamily="monospace"
-          transform={`rotate(-90 ${-padding * 0.35 - padding * 0.06} ${face.heightMm / 2})`}
+          transform={`rotate(-90 ${-padX * 0.35 - padX * 0.06} ${face.heightMm / 2})`}
         >
           {face.heightMm.toLocaleString("es-CL")} mm
         </text>

@@ -1,0 +1,36 @@
+name: Respaldo diario de base de datos
+
+# Corre todos los días a las 6:00 UTC (03:00 hora de Chile continental en
+# horario de invierno, 02:00 en horario de verano) y además se puede lanzar
+# a mano desde la pestaña "Actions" de GitHub con "Run workflow".
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Instalar cliente de PostgreSQL
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Generar el respaldo (pg_dump)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          set -e
+          if [ -z "$DATABASE_URL" ]; then
+            echo "Falta configurar el secret DATABASE_URL en Settings > Secrets and variables > Actions"
+            exit 1
+          fi
+          FECHA=$(date +'%Y-%m-%d_%H%M')
+          pg_dump "$DATABASE_URL" --no-owner --no-privileges -F c -f "respaldo_acero_${FECHA}.dump"
+          echo "NOMBRE_ARCHIVO=respaldo_acero_${FECHA}.dump" >> "$GITHUB_ENV"
+
+      - name: Subir respaldo como artefacto (se guarda 30 días)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.NOMBRE_ARCHIVO }}
+          path: ${{ env.NOMBRE_ARCHIVO }}
+          retention-days: 30

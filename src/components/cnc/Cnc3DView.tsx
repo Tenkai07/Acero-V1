@@ -41,17 +41,23 @@ function buildPlateMesh(piece: CncNormalizedPiece): THREE.Object3D {
   return mesh;
 }
 
-/** Genera una sección transversal 2D aproximada según el tipo de perfil DSTV */
+/**
+ * Genera la sección transversal 2D real según la FAMILIA de perfil ya
+ * clasificada en cncGeometry.ts (classifyProfileFamily). Cada familia tiene
+ * su propia geometría; si no se pudo determinar con certeza (unknown) se
+ * dibuja una barra maciza simple en vez de forzar una doble T, para no
+ * mostrar una forma engañosa.
+ */
 function buildProfileCrossSection(piece: CncNormalizedPiece): THREE.Shape {
   const h = piece.widthMm || 100; // altura/peralte
   const b = piece.faces.find((f) => f.faceCode === "o")?.heightMm || h * 0.6; // ancho de ala
   const tw = piece.webThicknessMm || Math.max(2, h * 0.04);
   const tf = piece.flangeThicknessMm || Math.max(2, h * 0.06);
-  const type = (piece.profileType || "").toUpperCase();
+  const family = piece.profileFamily || "unknown";
 
   const shape = new THREE.Shape();
 
-  if (type === "L") {
+  if (family === "angle") {
     // Ángulo: dos brazos en escuadra
     const t = tw || 5;
     shape.moveTo(0, 0);
@@ -61,7 +67,7 @@ function buildProfileCrossSection(piece: CncNormalizedPiece): THREE.Shape {
     shape.lineTo(t, h);
     shape.lineTo(0, h);
     shape.closePath();
-  } else if (type === "U" || type === "C") {
+  } else if (family === "channel") {
     // Canal / costanera en forma de C
     shape.moveTo(0, 0);
     shape.lineTo(b, 0);
@@ -72,8 +78,8 @@ function buildProfileCrossSection(piece: CncNormalizedPiece): THREE.Shape {
     shape.lineTo(b, h);
     shape.lineTo(0, h);
     shape.closePath();
-  } else if (type === "RU" || type === "RO") {
-    // Tubo rectangular/cuadrado (aproximado, pared tw)
+  } else if (family === "tube-rect") {
+    // Tubo rectangular/cuadrado hueco, pared de espesor tw
     const t = tw || Math.max(2, h * 0.05);
     const outer = [
       { x: -b / 2, y: -h / 2 }, { x: b / 2, y: -h / 2 }, { x: b / 2, y: h / 2 }, { x: -b / 2, y: h / 2 }
@@ -82,14 +88,47 @@ function buildProfileCrossSection(piece: CncNormalizedPiece): THREE.Shape {
     outer.slice(1).forEach((p) => shape.lineTo(p.x, p.y));
     shape.closePath();
     const inner = new THREE.Path();
-    inner.moveTo(-b / 2 + t, -h / 2 + t);
-    inner.lineTo(b / 2 - t, -h / 2 + t);
-    inner.lineTo(b / 2 - t, h / 2 - t);
-    inner.lineTo(-b / 2 + t, h / 2 - t);
+    const it = Math.min(t, h / 2 - 1, b / 2 - 1);
+    inner.moveTo(-b / 2 + it, -h / 2 + it);
+    inner.lineTo(b / 2 - it, -h / 2 + it);
+    inner.lineTo(b / 2 - it, h / 2 - it);
+    inner.lineTo(-b / 2 + it, h / 2 - it);
     inner.closePath();
     shape.holes.push(inner);
-  } else {
-    // I / W / IPE / HEA / genérico: doble T
+  } else if (family === "tube-round") {
+    // Cañería / tubo redondo hueco: diámetro exterior = h, pared tw
+    const outerR = h / 2;
+    const t = tw || Math.max(2, outerR * 0.1);
+    const innerR = Math.max(1, outerR - t);
+    shape.absarc(0, 0, outerR, 0, Math.PI * 2, false);
+    const inner = new THREE.Path();
+    inner.absarc(0, 0, innerR, 0, Math.PI * 2, true);
+    shape.holes.push(inner);
+  } else if (family === "round-bar") {
+    // Barra redonda maciza: diámetro = h
+    shape.absarc(0, 0, h / 2, 0, Math.PI * 2, false);
+  } else if (family === "square-bar") {
+    // Barra cuadrada/rectangular maciza
+    shape.moveTo(-b / 2, -h / 2);
+    shape.lineTo(b / 2, -h / 2);
+    shape.lineTo(b / 2, h / 2);
+    shape.lineTo(-b / 2, h / 2);
+    shape.closePath();
+  } else if (family === "tee") {
+    // Perfil T: ala arriba, alma hacia abajo
+    const halfB = b / 2;
+    const halfTw = tw / 2;
+    shape.moveTo(-halfB, h / 2 - tf);
+    shape.lineTo(-halfB, h / 2);
+    shape.lineTo(halfB, h / 2);
+    shape.lineTo(halfB, h / 2 - tf);
+    shape.lineTo(halfTw, h / 2 - tf);
+    shape.lineTo(halfTw, -h / 2);
+    shape.lineTo(-halfTw, -h / 2);
+    shape.lineTo(-halfTw, h / 2 - tf);
+    shape.closePath();
+  } else if (family === "i-beam") {
+    // I / W / IPE / HEA: doble T
     const halfB = b / 2;
     const halfTw = tw / 2;
     shape.moveTo(-halfB, -h / 2);
@@ -104,6 +143,15 @@ function buildProfileCrossSection(piece: CncNormalizedPiece): THREE.Shape {
     shape.lineTo(-halfTw, h / 2 - tf);
     shape.lineTo(-halfTw, -h / 2 + tf);
     shape.lineTo(-halfB, -h / 2 + tf);
+    shape.closePath();
+  } else {
+    // Tipo no identificado con certeza: en vez de forzar una viga (engañoso),
+    // se dibuja una barra maciza rectangular con las dimensiones reales
+    // conocidas (h x b) como aproximación neutra.
+    shape.moveTo(-b / 2, -h / 2);
+    shape.lineTo(b / 2, -h / 2);
+    shape.lineTo(b / 2, h / 2);
+    shape.lineTo(-b / 2, h / 2);
     shape.closePath();
   }
 

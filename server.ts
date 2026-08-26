@@ -80,6 +80,29 @@ async function initDatabase() {
     );
   `);
 
+  // Módulo "Cubicación y Bodega": proyectos BOM (nesting/compras) e
+  // inventario de bodega (barras + retazos), compartidos por toda la
+  // maestranza igual que projects/history.
+  await pool.query(`
+    create table if not exists bom_projects (
+      id text primary key,
+      name text not null,
+      updated_at bigint not null,
+      created_by uuid references users(id) on delete set null,
+      data jsonb not null
+    );
+  `);
+
+  await pool.query(`
+    create table if not exists inventory_items (
+      id text primary key,
+      code text not null,
+      updated_at bigint not null,
+      created_by uuid references users(id) on delete set null,
+      data jsonb not null
+    );
+  `);
+
   const { rows } = await pool.query(`select count(*)::int as count from users`);
   if (rows[0].count === 0) {
     const bootstrapUsername = process.env.ADMIN_USERNAME || "admin";
@@ -342,6 +365,35 @@ app.put("/api/settings/base-price", requireAuth, requireAdmin, async (req, res) 
   res.json({ success: true, basePriceKgCLP: price });
 });
 
+// Catálogo de productos Softland (importado desde el "Informe de Productos
+// Paramétrico"). Se guarda una sola vez como un JSON compartido para que
+// cualquiera en la maestranza pueda buscar códigos sin tener que volver a
+// subir el Excel cada vez.
+app.get("/api/settings/softland-catalog", requireAuth, async (req, res) => {
+  const { rows } = await pool.query(`select value from app_settings where key = 'softland_catalog'`);
+  res.json({ success: true, catalog: rows[0] ? rows[0].value : [] });
+});
+
+app.put("/api/settings/softland-catalog", requireAuth, async (req, res) => {
+  const { catalog } = req.body || {};
+  if (!Array.isArray(catalog)) {
+    return res.status(400).json({ success: false, error: "El catálogo debe ser un arreglo" });
+  }
+  if (catalog.length > 50000) {
+    return res.status(400).json({ success: false, error: "El catálogo excede el máximo soportado (50.000 productos)" });
+  }
+  const invalid = catalog.some((p) => !p || typeof p.code !== "string" || typeof p.description !== "string");
+  if (invalid) {
+    return res.status(400).json({ success: false, error: "Cada producto del catálogo necesita 'code' y 'description' como texto" });
+  }
+  await pool.query(
+    `insert into app_settings (key, value) values ('softland_catalog', $1::jsonb)
+     on conflict (key) do update set value = $1::jsonb`,
+    [JSON.stringify(catalog)]
+  );
+  res.json({ success: true, count: catalog.length });
+});
+
 // ---------------------------------------------------------------------------
 // Projects API
 // ---------------------------------------------------------------------------
@@ -457,11 +509,130 @@ app.delete("/api/history", requireAuth, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Módulo Cubicación y Bodega — Proyectos BOM (nesting/compras)
+// ---------------------------------------------------------------------------
+app.get("/api/bom-projects", requireAuth, async (req, res) => {
+  const { rows } = await pool.query(`select data from bom_projects order by updated_at desc`);
+  res.json({ success: true, bomProjects: rows.map((r) => r.data) });
+});
+
+app.post("/api/bom-projects", requireAuth, async (req: AuthedRequest, res) => {
+  const { bomProjects, ...maybeSingle } = req.body || {};
+  try {
+    if (Array.isArray(bomProjects)) {
+      const skipped: string[] = [];
+      let saved = 0;
+      for (const p of bomProjects) {
+        if (!p || typeof p.id !== "string" || p.id.trim().length === 0) {
+          skipped.push(String(p?.id ?? "(sin id)"));
+          continue;
+        }
+        await upsertBomProject(p, req.user!.id);
+        saved++;
+      }
+      const { rows } = await pool.query(`select data from bom_projects order by updated_at desc`);
+      return res.json({ success: true, count: saved, skipped, bomProjects: rows.map((r) => r.data) });
+    }
+    const single = maybeSingle;
+    if (single && typeof single.id === "string" && single.id.trim().length > 0) {
+      const saved = await upsertBomProject(single, req.user!.id);
+      return res.json({ success: true, bomProject: saved });
+    }
+    res.status(400).json({ success: false, error: "Formato de proyecto de cubicación inválido: falta un 'id' de texto válido" });
+  } catch (e) {
+    console.error("Error guardando proyecto de cubicación", e);
+    res.status(500).json({ success: false, error: "Error del servidor al guardar el proyecto de cubicación" });
+  }
+});
+
+async function upsertBomProject(project: any, userId: string) {
+  const now = Date.now();
+  const updatedAt =
+    typeof project.updatedAt === "number"
+      ? project.updatedAt
+      : project.updatedAt
+      ? new Date(project.updatedAt).getTime()
+      : now;
+  const dataToStore = { ...project, updatedAt: project.updatedAt || now };
+  await pool.query(
+    `insert into bom_projects (id, name, updated_at, created_by, data)
+     values ($1, $2, $3, $4, $5::jsonb)
+     on conflict (id) do update set name = $2, updated_at = $3, data = $5::jsonb`,
+    [project.id, project.name || "Proyecto de cubicación sin nombre", updatedAt, userId, JSON.stringify(dataToStore)]
+  );
+  return dataToStore;
+}
+
+app.delete("/api/bom-projects/:id", requireAuth, async (req, res) => {
+  const { id } = req.params;
+  await pool.query(`delete from bom_projects where id = $1`, [id]);
+  res.json({ success: true, deletedId: id });
+});
+
+// ---------------------------------------------------------------------------
+// Módulo Cubicación y Bodega — Inventario de bodega (barras + retazos)
+// ---------------------------------------------------------------------------
+app.get("/api/inventory", requireAuth, async (req, res) => {
+  const { rows } = await pool.query(`select data from inventory_items order by updated_at desc`);
+  res.json({ success: true, inventory: rows.map((r) => r.data) });
+});
+
+app.post("/api/inventory", requireAuth, async (req: AuthedRequest, res) => {
+  const { inventory, ...maybeSingle } = req.body || {};
+  try {
+    if (Array.isArray(inventory)) {
+      // Reemplazo completo: el cliente de Inventario maneja la lista entera
+      // en memoria (agrega/edita/descuenta) y guarda el arreglo completo.
+      // Se sincroniza como "upsert de todos + borrar los que ya no están".
+      const valid = inventory.filter((it: any) => it && typeof it.id === "string" && it.id.trim().length > 0);
+      const skipped = inventory.length - valid.length;
+      for (const it of valid) {
+        await upsertInventoryItem(it, req.user!.id);
+      }
+      const incomingIds = valid.map((it: any) => it.id);
+      if (incomingIds.length > 0) {
+        await pool.query(`delete from inventory_items where not (id = any($1::text[]))`, [incomingIds]);
+      }
+      const { rows } = await pool.query(`select data from inventory_items order by updated_at desc`);
+      return res.json({ success: true, count: rows.length, skipped, inventory: rows.map((r) => r.data) });
+    }
+    const single = maybeSingle;
+    if (single && typeof single.id === "string" && single.id.trim().length > 0) {
+      const saved = await upsertInventoryItem(single, req.user!.id);
+      return res.json({ success: true, item: saved });
+    }
+    res.status(400).json({ success: false, error: "Formato de inventario inválido: falta un 'id' de texto válido" });
+  } catch (e) {
+    console.error("Error guardando inventario", e);
+    res.status(500).json({ success: false, error: "Error del servidor al guardar el inventario" });
+  }
+});
+
+async function upsertInventoryItem(item: any, userId: string) {
+  const now = Date.now();
+  const dataToStore = { ...item, lastUpdated: item.lastUpdated || new Date().toISOString() };
+  const updatedAt = new Date(dataToStore.lastUpdated).getTime() || now;
+  await pool.query(
+    `insert into inventory_items (id, code, updated_at, created_by, data)
+     values ($1, $2, $3, $4, $5::jsonb)
+     on conflict (id) do update set code = $2, updated_at = $3, data = $5::jsonb`,
+    [item.id, item.code || item.id, updatedAt, userId, JSON.stringify(dataToStore)]
+  );
+  return dataToStore;
+}
+
+app.delete("/api/inventory/:id", requireAuth, async (req, res) => {
+  const { id } = req.params;
+  await pool.query(`delete from inventory_items where id = $1`, [id]);
+  res.json({ success: true, deletedId: id });
+});
+
+// ---------------------------------------------------------------------------
 // Cloud sync endpoint (bidirectional merge) — usado por el cliente cuando
 // vuelve a tener conexión, para fusionar lo que guardó localmente.
 // ---------------------------------------------------------------------------
 app.post("/api/sync", requireAuth, async (req: AuthedRequest, res) => {
-  const { localProjects, localHistory } = req.body || {};
+  const { localProjects, localHistory, localBomProjects, localInventory } = req.body || {};
 
   try {
     if (Array.isArray(localProjects)) {
@@ -484,14 +655,43 @@ app.post("/api/sync", requireAuth, async (req: AuthedRequest, res) => {
         }
       }
     }
+    if (Array.isArray(localBomProjects)) {
+      const { rows: serverRows } = await pool.query(`select id, updated_at from bom_projects`);
+      const serverUpdatedAt = new Map(serverRows.map((r) => [r.id, Number(r.updated_at)]));
+      for (const lp of localBomProjects) {
+        const serverTs = serverUpdatedAt.get(lp.id);
+        const localTs = typeof lp.updatedAt === "number" ? lp.updatedAt : new Date(lp.updatedAt || Date.now()).getTime();
+        if (serverTs === undefined || localTs >= serverTs) {
+          await upsertBomProject(lp, req.user!.id);
+        }
+      }
+    }
+    if (Array.isArray(localInventory)) {
+      const { rows: serverRows } = await pool.query(`select id, updated_at from inventory_items`);
+      const serverUpdatedAt = new Map(serverRows.map((r) => [r.id, Number(r.updated_at)]));
+      for (const it of localInventory) {
+        const serverTs = serverUpdatedAt.get(it.id);
+        const localTs = new Date(it.lastUpdated || 0).getTime();
+        // Si el material no existe aún en el servidor, o la copia local es
+        // igual o más nueva, se sube. Si el servidor tiene una versión más
+        // nueva (otro terminal descontó stock después), se respeta esa.
+        if (serverTs === undefined || localTs >= serverTs) {
+          await upsertInventoryItem(it, req.user!.id);
+        }
+      }
+    }
 
     const { rows: projectRows } = await pool.query(`select data from projects order by updated_at desc`);
     const { rows: historyRows } = await pool.query(`select data from history_items order by timestamp desc limit 500`);
+    const { rows: bomProjectRows } = await pool.query(`select data from bom_projects order by updated_at desc`);
+    const { rows: inventoryRows } = await pool.query(`select data from inventory_items order by updated_at desc`);
 
     res.json({
       success: true,
       projects: projectRows.map((r) => r.data),
       history: historyRows.map((r) => r.data),
+      bomProjects: bomProjectRows.map((r) => r.data),
+      inventory: inventoryRows.map((r) => r.data),
       serverTimestamp: Date.now()
     });
   } catch (e) {

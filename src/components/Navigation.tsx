@@ -8,7 +8,9 @@ import {
   ArrowRightLeft, 
   ShoppingBag, 
   FolderKanban,
-  FileBox
+  FileBox,
+  Warehouse,
+  BarChart3
 } from "lucide-react";
 import { NavigationTab } from "../types";
 
@@ -100,12 +102,26 @@ export const Navigation: React.FC<NavigationProps> = ({
       icon: ShoppingBag
     },
     {
+      id: "cubicacion",
+      label: "Cubicación & Bodega",
+      shortLabel: "Cubicación",
+      subLabel: "BOM, Empalmes, Anidado, Compras",
+      icon: Warehouse
+    },
+    {
       id: "projects",
       label: "Proyectos & Historial",
       shortLabel: "Proyectos",
-      subLabel: "Cubicación PDF / Excel",
+      subLabel: "Presupuestos y Cálculos Guardados",
       icon: FolderKanban,
       badge: projectsCount > 0 ? projectsCount : (historyCount > 0 ? historyCount : undefined)
+    },
+    {
+      id: "reports",
+      label: "Reportes",
+      shortLabel: "Reportes",
+      subLabel: "Inventario, Cubicación y Softland",
+      icon: BarChart3
     }
   ];
 

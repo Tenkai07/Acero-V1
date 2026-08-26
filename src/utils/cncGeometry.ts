@@ -7,6 +7,76 @@ export interface CncHole {
   diameterMm: number;
 }
 
+// ---------------------------------------------------------------------------
+// Clasificación de familia de perfil: determina QUÉ FORMA 3D corresponde
+// dibujar. No confiamos únicamente en el código de una letra del bloque ST
+// (campo "profileType"), porque varía entre softwares CAM y muchas veces
+// viene vacío, mal alineado o con formato distinto. Cruzamos ese código con
+// el texto del "profileCode" (ej. "L50X50X5", "HEA200", "RHS100X50X4"),
+// que en la práctica es mucho más confiable.
+// ---------------------------------------------------------------------------
+export type ProfileFamily =
+  | "i-beam"
+  | "channel"
+  | "angle"
+  | "tube-rect"
+  | "tube-round"
+  | "tee"
+  | "round-bar"
+  | "square-bar"
+  | "unknown";
+
+export function isPlateProfile(profileTypeRaw: string, profileCode: string): boolean {
+  const type = (profileTypeRaw || "").trim().toUpperCase();
+  const code = (profileCode || "").trim().toUpperCase();
+  if (type === "B") return true; // "B" = Blech (plancha) en el estándar DSTV
+  return /^(PL|PLT|PLATE|PLANCHA|CHAPA|BLECH)\b/.test(code);
+}
+
+/**
+ * Extrae el espesor de una plancha desde el propio código de perfil, que en
+ * Chile suele venir como "PL6*118.5" (espesor*ancho) o "PL10x1200x2400".
+ * Es más confiable que los campos numéricos del bloque ST, cuyo orden para
+ * planchas varía según el software CAM que generó el archivo.
+ */
+export function parsePlateThicknessFromCode(profileCode: string): number | null {
+  const m = (profileCode || "").match(/PL\.?\s*(\d+(?:[.,]\d+)?)/i);
+  if (!m) return null;
+  const val = parseFloat(m[1].replace(",", "."));
+  return isNaN(val) ? null : val;
+}
+
+export function classifyProfileFamily(profileTypeRaw: string, profileCode: string): ProfileFamily {
+  const type = (profileTypeRaw || "").trim().toUpperCase();
+  const code = (profileCode || "").trim().toUpperCase().replace(/\s+/g, "");
+
+  // Tubo redondo / cañería
+  if (type === "RO" || /^(CHS|TUB\.?RED|TUBORED|OD)/.test(code)) return "tube-round";
+
+  // Tubo cuadrado / rectangular
+  if (type === "RU" || /^(SHS|RHS|TUB\.?CUAD|TUBCUAD|TUB\.?REC|TUBREC)/.test(code)) return "tube-rect";
+
+  // Ángulo
+  if (type === "L" || /^(L\d|ANGULO|ANGLE)/.test(code)) return "angle";
+
+  // Canal / costanera (laminado U o conformado en frío C/Z)
+  if (type === "U" || type === "C" || /^(U\d|UPN|UPE|CANAL|COSTANERA|C\d|Z\d)/.test(code)) return "channel";
+
+  // Perfil T
+  if (type === "T" || /^T\d/.test(code)) return "tee";
+
+  // Barra redonda maciza
+  if (/^(BARRARED|ROUNDBAR|RD\d)/.test(code)) return "round-bar";
+
+  // Barra cuadrada maciza
+  if (/^(BARRACUAD|SQUAREBAR|SQ\d)/.test(code)) return "square-bar";
+
+  // Perfil doble T (I / W / HEA / HEB / IPE / IPN / HN ...)
+  if (type === "I" || /^(I|W|HE[AB]|IPE|IPN|HN|HP)\d/.test(code)) return "i-beam";
+
+  return "unknown";
+}
+
 export interface CncFaceView {
   faceCode: DstvFace | "plate";
   faceLabel: string;
@@ -21,6 +91,7 @@ export interface CncNormalizedPiece {
   source: "dxf" | "dstv";
   label: string;
   profileType?: string;
+  profileFamily?: ProfileFamily;
   grade: string;
   quantity: number;
   lengthMm: number;
@@ -40,6 +111,60 @@ const FACE_LABELS: Record<DstvFace, string> = {
 };
 
 export function normalizeDstvPiece(piece: DstvPiece): CncNormalizedPiece {
+  // Las planchas/planchas de corte (DSTV tipo "B" = Blech) vienen dentro de
+  // archivos NC1 igual que un perfil, pero geométricamente son un elemento
+  // plano: hay que tratarlas como "plate" (igual que un DXF), no extruir
+  // una sección de perfil.
+  if (isPlateProfile(piece.profileType, piece.profileCode)) {
+    const allHoles = piece.holes.map((h) => ({ x: h.x, y: h.y, diameterMm: h.diameterMm }));
+    const outer = piece.outerContours[0];
+    const outerPts = outer?.points && outer.points.length > 2 ? outer.points : null;
+
+    // El contorno real (AK) es la fuente más confiable para el tamaño de la
+    // plancha: refleja la forma real (incluidos chaflanes/recortes), a
+    // diferencia de los campos numéricos del header cuyo orden varía entre
+    // exportadores y para planchas no sigue el layout h/b/tw/tf de un perfil.
+    const xs = outerPts?.map((p) => p.x) || [];
+    const ys = outerPts?.map((p) => p.y) || [];
+    const boundingW = outerPts ? Math.max(...xs) - Math.min(...xs) : 0;
+    const boundingH = outerPts ? Math.max(...ys) - Math.min(...ys) : 0;
+
+    const width = boundingW || piece.lengthMm || 0;
+    const height = boundingH || piece.heightMm || piece.widthMm || 0;
+    const contour =
+      outerPts ||
+      [
+        { x: 0, y: 0 },
+        { x: width, y: 0 },
+        { x: width, y: height },
+        { x: 0, y: height },
+        { x: 0, y: 0 }
+      ];
+    const thickness =
+      parsePlateThicknessFromCode(piece.profileCode) || piece.webThicknessMm || piece.flangeThicknessMm || 10;
+
+    return {
+      kind: "plate",
+      source: "dstv",
+      label: piece.profileCode || "Plancha",
+      grade: piece.grade,
+      quantity: piece.quantity,
+      lengthMm: width,
+      widthMm: height,
+      thicknessMm: thickness,
+      faces: [
+        {
+          faceCode: "plate",
+          faceLabel: "Plancha",
+          widthMm: width,
+          heightMm: height,
+          contour,
+          holes: allHoles
+        }
+      ]
+    };
+  }
+
   const facesPresent = new Set<DstvFace>();
   piece.holes.forEach((h) => facesPresent.add(h.face));
   piece.outerContours.forEach((c) => facesPresent.add(c.face));
@@ -87,6 +212,7 @@ export function normalizeDstvPiece(piece: DstvPiece): CncNormalizedPiece {
     source: "dstv",
     label: piece.profileCode,
     profileType: piece.profileType,
+    profileFamily: classifyProfileFamily(piece.profileType, piece.profileCode),
     grade: piece.grade,
     quantity: piece.quantity,
     lengthMm: piece.lengthMm,

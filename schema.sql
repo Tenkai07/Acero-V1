@@ -29,6 +29,29 @@ create table if not exists history_items (
   data jsonb not null
 );
 
+-- Módulo "Cubicación y Bodega" (importado desde la app Inventario-y-Cubicación).
+-- Mismo patrón que 'projects': fila = 1 proyecto BOM completo (grupos, nesting,
+-- compras) guardado como jsonb. Es información compartida por toda la
+-- maestranza (no filtrada por usuario), igual que projects/history.
+create table if not exists bom_projects (
+  id text primary key,
+  name text not null,
+  updated_at bigint not null,
+  created_by uuid references users(id) on delete set null,
+  data jsonb not null
+);
+
+-- Inventario de bodega (barras + retazos). Una fila por material (perfil).
+-- Es el "stock" compartido de toda la maestranza, se actualiza con cada
+-- descuento de pre-anidado o ingreso de compra.
+create table if not exists inventory_items (
+  id text primary key,
+  code text not null,
+  updated_at bigint not null,
+  created_by uuid references users(id) on delete set null,
+  data jsonb not null
+);
+
 create table if not exists app_settings (
   key text primary key,
   value jsonb not null

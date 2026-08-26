@@ -7,7 +7,9 @@ export type NavigationTab =
   | "converter" 
   | "cnc"
   | "catalog" 
-  | "projects";
+  | "projects"
+  | "cubicacion"
+  | "reports";
 
 export type TabType = NavigationTab | "calculators";
 

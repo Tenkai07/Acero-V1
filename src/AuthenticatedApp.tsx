@@ -9,8 +9,12 @@ import { InteractiveProfileManual } from "./components/manual/InteractiveProfile
 import { UnitConverter } from "./components/calculators/UnitConverter";
 import { lazy, Suspense } from "react";
 const CncViewer = lazy(() => import("./components/cnc/CncViewer").then((m) => ({ default: m.CncViewer })));
+const CubicacionModule = lazy(() =>
+  import("./inventario/CubicacionModule").then((m) => ({ default: m.CubicacionModule }))
+);
 import { SteelCatalogAndPrices } from "./components/catalog/SteelCatalogAndPrices";
 import { ProjectsAndHistory } from "./components/history/ProjectsAndHistory";
+import { ReportsView } from "./components/ReportsView";
 import { ThemeStudioModal, VisualThemePreset, UIDensity } from "./components/ThemeStudioModal";
 import { InstallModal } from "./components/InstallModal";
 import { UserManagementModal } from "./components/admin/UserManagementModal";
@@ -390,6 +394,19 @@ export function AuthenticatedApp() {
           <SteelCatalogAndPrices />
         )}
 
+        {activeTab === "cubicacion" && (
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center py-24 text-slate-500 text-sm gap-2">
+                <span className="w-4 h-4 border-2 border-sky-500 border-t-transparent rounded-full animate-spin" />
+                Cargando Cubicación & Bodega...
+              </div>
+            }
+          >
+            <CubicacionModule />
+          </Suspense>
+        )}
+
         {activeTab === "projects" && (
           <ProjectsAndHistory
             projects={projects}
@@ -408,6 +425,8 @@ export function AuthenticatedApp() {
             onAddHistoryItemToProject={handleAddHistoryItemToProject}
           />
         )}
+
+        {activeTab === "reports" && <ReportsView />}
       </main>
 
       {/* Theme Studio Customizer Modal */}

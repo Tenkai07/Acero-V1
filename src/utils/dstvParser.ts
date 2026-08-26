@@ -70,14 +70,30 @@ function tokenize(line: string): string[] {
   return line.trim().split(/\s+/).filter(Boolean);
 }
 
+// Palabras clave que inician un bloque DSTV. Algunos exportadores CNC omiten
+// el "EN" de cierre de un bloque (p.ej. el bloque ST) y pasan directo al
+// siguiente bloque separados solo por líneas en blanco. Si al leer un bloque
+// solo paramos en "EN", en esos archivos el lector "se come" todos los
+// bloques siguientes como si fueran parte del bloque anterior. Por eso cada
+// lector de bloque también debe detenerse al toparse con otra palabra clave.
+const BLOCK_KEYWORDS = new Set(["ST", "BO", "AK", "IK", "SI", "SC", "KO", "PU", "KA", "TE", "EN"]);
+
+function isBlockTerminator(line: string): boolean {
+  return BLOCK_KEYWORDS.has(line.toUpperCase());
+}
+
 /**
  * Parsea el contenido completo de un archivo .nc1/.nc/.dstv en un DstvPiece.
  */
 export function parseDstvFile(content: string): DstvPiece {
   const lines = content
     .split(/\r?\n/)
-    .map((l) => l.replace(/\*.*$/, "").trim()) // quita comentarios tras '*'
-    .filter((l) => l.length > 0);
+    .map((l) => l.trim())
+    // Convención DSTV: una línea que EMPIEZA con "*" (o "**") es un comentario
+    // completo y se descarta. Un "*" que aparece en medio de una línea de
+    // datos (p.ej. "PL6*118.5", notación chilena espesor*ancho para
+    // planchas) NO es un comentario y debe conservarse íntegro.
+    .filter((l) => l.length > 0 && !l.startsWith("*"));
 
   const piece: DstvPiece = {
     profileCode: "",
@@ -107,19 +123,20 @@ export function parseDstvFile(content: string): DstvPiece {
     if (upper === "ST") {
       i++;
       // Bloque de cabecera: cada línea siguiente es un campo, hasta "EN"
+      // (o hasta el inicio de otro bloque, si el archivo no trae "EN").
       const headerLines: string[] = [];
-      while (i < lines.length && lines[i].toUpperCase() !== "EN") {
+      while (i < lines.length && !isBlockTerminator(lines[i])) {
         headerLines.push(lines[i]);
         i++;
       }
-      i++; // saltar EN
+      if (i < lines.length && lines[i].toUpperCase() === "EN") i++; // saltar EN si existe
       applyHeaderFields(piece, headerLines);
       continue;
     }
 
     if (upper === "BO") {
       i++;
-      while (i < lines.length && lines[i].toUpperCase() !== "EN") {
+      while (i < lines.length && !isBlockTerminator(lines[i])) {
         const t = tokenize(lines[i]);
         // Formato típico: <cara> <x> <y> <diametro> [...]
         if (t.length >= 4) {
@@ -132,7 +149,7 @@ export function parseDstvFile(content: string): DstvPiece {
         }
         i++;
       }
-      i++;
+      if (i < lines.length && lines[i].toUpperCase() === "EN") i++;
       continue;
     }
 
@@ -140,19 +157,30 @@ export function parseDstvFile(content: string): DstvPiece {
       i++;
       let currentFace: DstvFace = "v";
       const points: DstvContourPoint[] = [];
-      while (i < lines.length && lines[i].toUpperCase() !== "EN") {
+      let isFirstDataLine = true;
+      while (i < lines.length && !isBlockTerminator(lines[i])) {
         const t = tokenize(lines[i]);
-        if (t.length >= 3) {
-          currentFace = (t[0].toLowerCase() as DstvFace) || currentFace;
+        // La letra de cara (v/o/u/h) solo aparece como primer token en la
+        // PRIMERA línea del bloque; las líneas siguientes son solo
+        // coordenadas X,Y (+ columnas de flags/radio). Si asumimos que
+        // cada línea trae la letra, las columnas se desfasan y el
+        // contorno queda mal formado.
+        const hasFaceToken = isFirstDataLine && /^[vouh]$/i.test(t[0] || "");
+        const xTok = hasFaceToken ? t[1] : t[0];
+        const yTok = hasFaceToken ? t[2] : t[1];
+        const flagTok = hasFaceToken ? t[3] : t[2];
+        if (hasFaceToken) currentFace = t[0].toLowerCase() as DstvFace;
+        if (t.length >= (hasFaceToken ? 3 : 2)) {
           points.push({
-            x: parseNum(t[1]),
-            y: parseNum(t[2]),
-            isRadius: t.length > 3 && /r/i.test(t[3])
+            x: parseNum(xTok),
+            y: parseNum(yTok),
+            isRadius: !!flagTok && /r/i.test(flagTok)
           });
         }
+        isFirstDataLine = false;
         i++;
       }
-      i++;
+      if (i < lines.length && lines[i].toUpperCase() === "EN") i++;
       const contour: DstvContour = { face: currentFace, points };
       if (upper === "AK") piece.outerContours.push(contour);
       else piece.innerContours.push(contour);
@@ -161,7 +189,7 @@ export function parseDstvFile(content: string): DstvPiece {
 
     if (upper === "SI") {
       i++;
-      while (i < lines.length && lines[i].toUpperCase() !== "EN") {
+      while (i < lines.length && !isBlockTerminator(lines[i])) {
         const t = tokenize(lines[i]);
         if (t.length >= 4) {
           piece.markings.push({
@@ -173,7 +201,7 @@ export function parseDstvFile(content: string): DstvPiece {
         }
         i++;
       }
-      i++;
+      if (i < lines.length && lines[i].toUpperCase() === "EN") i++;
       continue;
     }
 
@@ -181,11 +209,11 @@ export function parseDstvFile(content: string): DstvPiece {
     if (/^(SC|KO|PU|KA|TE)$/.test(upper)) {
       const blockLines: string[] = [line];
       i++;
-      while (i < lines.length && lines[i].toUpperCase() !== "EN") {
+      while (i < lines.length && !isBlockTerminator(lines[i])) {
         blockLines.push(lines[i]);
         i++;
       }
-      if (i < lines.length) i++;
+      if (i < lines.length && lines[i].toUpperCase() === "EN") i++;
       piece.rawUnknownBlocks.push(blockLines.join(" | "));
       continue;
     }
