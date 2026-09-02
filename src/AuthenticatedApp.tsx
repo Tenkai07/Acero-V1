@@ -14,6 +14,7 @@ const CubicacionModule = lazy(() =>
   import("./inventario/CubicacionModule").then((m) => ({ default: m.CubicacionModule }))
 );
 import { SteelCatalogAndPrices } from "./components/catalog/SteelCatalogAndPrices";
+import { IchaCatalogView } from "./components/catalog/IchaCatalogView";
 import { ProjectsAndHistory } from "./components/history/ProjectsAndHistory";
 import { ReportsView } from "./components/ReportsView";
 import { ThemeStudioModal, VisualThemePreset, UIDensity } from "./components/ThemeStudioModal";
@@ -395,6 +396,10 @@ export function AuthenticatedApp() {
 
         {activeTab === "catalog" && (
           <SteelCatalogAndPrices />
+        )}
+
+        {activeTab === "icha" && (
+          <IchaCatalogView />
         )}
 
         {activeTab === "cubicacion" && (

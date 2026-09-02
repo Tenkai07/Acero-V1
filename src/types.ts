@@ -7,7 +7,8 @@ export type NavigationTab =
   | "manual" 
   | "converter" 
   | "cnc"
-  | "catalog" 
+  | "catalog"
+  | "icha"
   | "projects"
   | "cubicacion"
   | "reports";
@@ -218,4 +219,51 @@ export interface PriceReference {
   priceCLP: number;
   distributorNotes: string;
   lastUpdated: string;
+}
+
+// ---------------------------------------------------------------------------
+// Catálogo ICHA (Instituto Chileno del Acero)
+// ---------------------------------------------------------------------------
+
+/** Familia estructural según los manuales ICHA. */
+export type IchaFamily = "C" | "CA" | "IN" | "HN" | "L" | "CAJON" | "TUBO";
+
+/** Manual de origen: Tradicional (NCh427) o la revisión 2001. */
+export type IchaManual = "TRAD" | "2001";
+
+/**
+ * Perfil del catálogo ICHA con sus propiedades de diseño.
+ *
+ * Lo distintivo frente a `ProfileDefinition` (el catálogo comercial de la
+ * app) son dos cosas: la DOBLE designación —`name` es la de planos
+ * ("C 25x17.9", el segundo número es el peso en kgf/m) y `mm` la de medidas
+ * reales ("C 250x75x6")— y las constantes de torsión `J` y alabeo `Cw`, que
+ * hacen falta para verificar pandeo lateral-torsional y no están en el
+ * catálogo comercial.
+ */
+export interface IchaProfile {
+  type: IchaFamily;
+  man: IchaManual;
+  /** Designación tradicional de planos, ej. "C 25x17.9". */
+  name: string;
+  /** Designación por medidas reales en mm, ej. "C 250x75x6". */
+  mm: string;
+  h: number; // altura/peralte en mm
+  b: number; // ancho de ala en mm (en tubos, el diámetro)
+  t?: number; // espesor de pared uniforme en mm (C, CA, L, cajón, tubo)
+  tw?: number; // espesor del alma en mm (perfiles soldados IN/HN)
+  tf?: number; // espesor del ala en mm (perfiles soldados IN/HN)
+  c?: number; // labio atiesador en mm (costaneras CA)
+  W: number; // peso nominal en kgf/m
+  A: number; // área en cm²
+  Ix: number; // inercia eje fuerte en cm⁴
+  Wx: number; // módulo elástico eje fuerte en cm³
+  rx: number; // radio de giro eje fuerte en cm
+  Iy: number; // inercia eje débil en cm⁴
+  Wy: number; // módulo elástico eje débil en cm³
+  ry: number; // radio de giro eje débil en cm
+  x?: number; // centro de gravedad en cm
+  xo?: number; // centro de corte en cm
+  J?: number; // constante de torsión de St. Venant en cm⁴
+  Cw?: number; // constante de alabeo en cm⁶
 }

@@ -7,6 +7,7 @@ import {
   BookOpen,
   ArrowRightLeft,
   ShoppingBag,
+  BookMarked,
   FolderKanban,
   FileBox,
   Warehouse,
@@ -108,6 +109,13 @@ export const Navigation: React.FC<NavigationProps> = ({
       shortLabel: "Catálogo",
       subLabel: "Identificación en Taller, Precios",
       icon: ShoppingBag
+    },
+    {
+      id: "icha",
+      label: "Catálogo ICHA",
+      shortLabel: "ICHA",
+      subLabel: "309 perfiles, doble designación, J y Cw",
+      icon: BookMarked
     },
     {
       id: "cubicacion",

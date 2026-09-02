@@ -1,18 +1,35 @@
 import { MaterialCategory } from '../types';
+import { findIchaProfile } from '../../utils/ichaDesignation';
 
 /**
- * Un tubo CUADRADO se escribe de dos formas equivalentes en las planillas:
- * "RHS150X6" y "RHS150X150X6" son exactamente el mismo perfil (150×150,
- * espesor 6). Si quedan como dos perfiles distintos, el anidado nunca
- * combina sus piezas entre sí y se compra material de más — en el proyecto
- * real P420 esa separación costaba ~144m de acero.
+ * Lleva un código de perfil a una forma única, para que el MISMO material
+ * escrito de distinta forma se agrupe y compita por las mismas barras en
+ * vez de comprarse dos veces. Cubre los dos casos que aparecen de verdad en
+ * las planillas:
  *
- * Devuelve la forma corta canónica para poder agruparlos. Solo colapsa
- * cuando las dos primeras medidas son IGUALES: "RHS200X100X4" es un tubo
- * rectangular de verdad y se deja tal cual.
+ *  1. Tubo cuadrado con la medida repetida: "RHS150X6" y "RHS150X150X6" son
+ *     el mismo perfil (150×150, espesor 6). Solo colapsa cuando las dos
+ *     primeras medidas son IGUALES — "RHS200X100X4" es un rectangular de
+ *     verdad y se deja tal cual. En el proyecto real P420 esa separación
+ *     costaba ~144m de acero.
+ *
+ *  2. Doble designación ICHA: los planos traen "C 25x17.9" (el número es el
+ *     peso en kgf/m) y bodega habla en medidas, "C 250x75x6". Se canoniza
+ *     siempre a la forma por MEDIDAS, que es la que se cotiza y la que
+ *     figura en el inventario. Un código que no está en el catálogo ICHA
+ *     (ej. un RHS comercial) se devuelve sin tocar.
  */
 export function canonicalProfileCode(profileCode: string): string {
   const code = (profileCode || '').trim().toUpperCase();
+
+  const icha = findIchaProfile(code);
+  if (icha) {
+    // Sin espacios y en mayúsculas para que calce con cómo vienen los
+    // códigos en las planillas ("C250X75X6"), no con el formato de
+    // catálogo ("C 250x75x6").
+    return icha.mm.toUpperCase().replace(/\s+/g, '');
+  }
+
   const squareTube = /^(RHS|SHS)(\d+)X(\d+)X(\d+)$/.exec(code);
   if (squareTube && squareTube[2] === squareTube[3]) {
     return `${squareTube[1]}${squareTube[2]}X${squareTube[4]}`;
